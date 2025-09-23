@@ -179,20 +179,33 @@ class PopupChoice {
 
 // Database service classes
 class DatabaseService {
-  static final SupabaseClient _supabase = Supabase.instance.client;
+  static SupabaseClient? get _supabase {
+    try {
+      return Supabase.instance.client;
+    } catch (e) {
+      debugPrint('⚠️ Supabase non inizializzato: $e');
+      return null;
+    }
+  }
 
   // Test database connection and ensure tables exist
   static Future<bool> testConnection() async {
     try {
       debugPrint('🔄 DatabaseService: Test connessione database...');
 
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ DatabaseService: Supabase non inizializzato');
+        return false;
+      }
+
       // Test basic connection
-      await _supabase.auth.getUser();
+      await supabase.auth.getUser();
       debugPrint('✅ DatabaseService: Connessione base OK');
 
       // Test quality_monitoring table
       try {
-        await _supabase.from('quality_monitoring').select('id').limit(1);
+        await supabase.from('quality_monitoring').select('id').limit(1);
         debugPrint('✅ DatabaseService: Tabella quality_monitoring accessibile');
       } catch (e) {
         debugPrint('❌ DatabaseService: Errore accesso tabella quality_monitoring: $e');
@@ -201,7 +214,7 @@ class DatabaseService {
 
       // Test reject_details table
       try {
-        await _supabase.from('reject_details').select('id').limit(1);
+        await supabase.from('reject_details').select('id').limit(1);
         debugPrint('✅ DatabaseService: Tabella reject_details accessibile');
       } catch (e) {
         debugPrint('❌ DatabaseService: Errore accesso tabella reject_details: $e');
@@ -224,7 +237,13 @@ class DatabaseService {
     required String filePath,
   }) async {
     try {
-      await _supabase.from('job_schedules').insert({
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ DatabaseService: Supabase non inizializzato per saveJob');
+        return false;
+      }
+
+      await supabase.from('job_schedules').insert({
         'article_code': articleCode,
         'lot': lot,
         'pieces': pieces,
@@ -247,9 +266,15 @@ class DatabaseService {
     try {
       debugPrint('🔄 DatabaseService: Inizio salvataggio dati qualità...');
 
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ DatabaseService: Supabase non inizializzato per saveQualityData');
+        return false;
+      }
+
       // Check Supabase connection first
       try {
-        await _supabase.auth.getUser();
+        await supabase.auth.getUser();
         debugPrint('✅ DatabaseService: Connessione Supabase OK');
       } catch (authError) {
         debugPrint('⚠️ DatabaseService: Auth check failed (expected for anonymous access): $authError');
@@ -258,7 +283,7 @@ class DatabaseService {
 
       // Save main quality record
       debugPrint('🔄 DatabaseService: Inserimento record principale...');
-      final qualityResponse = await _supabase.from('quality_monitoring').insert({
+      final qualityResponse = await supabase.from('quality_monitoring').insert({
         'monitoring_path': monitoringPath,
         'total_pieces': data.totalPieces,
         'good_pieces': data.goodPieces,
@@ -281,7 +306,7 @@ class DatabaseService {
           'timestamp': reject.timestamp.toIso8601String(),
         }).toList();
 
-        await _supabase.from('reject_details').insert(rejectData);
+        await supabase.from('reject_details').insert(rejectData);
         debugPrint('✅ DatabaseService: Dettagli scarti salvati');
       } else {
         debugPrint('ℹ️ DatabaseService: Nessun dettaglio scarto da salvare');
@@ -301,7 +326,13 @@ class DatabaseService {
   // Get job history
   static Future<List<Map<String, dynamic>>> getJobHistory() async {
     try {
-      final response = await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per getJobHistory');
+        return [];
+      }
+
+      final response = await supabase
           .from('job_schedules')
           .select()
           .order('created_at', ascending: false)
@@ -317,7 +348,13 @@ class DatabaseService {
   // Get quality monitoring history
   static Future<List<Map<String, dynamic>>> getQualityHistory() async {
     try {
-      final response = await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per getQualityHistory');
+        return [];
+      }
+
+      final response = await supabase
           .from('quality_monitoring')
           .select('*, reject_details(*)')
           .order('timestamp', ascending: false)
@@ -332,8 +369,65 @@ class DatabaseService {
 }
 
 // App Mode Service for managing Server/Remote functionality
+class SupabaseConfigService {
+  // Get stored Supabase URL from SharedPreferences
+  static Future<String> getSupabaseUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('supabase_url') ?? dotenv.env['SUPABASE_URL'] ?? 'http://192.168.1.225:8000';
+  }
+
+  // Get stored Supabase Anon Key from SharedPreferences
+  static Future<String> getSupabaseAnonKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('supabase_anon_key') ?? dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+  }
+
+  // Save Supabase URL to SharedPreferences
+  static Future<bool> setSupabaseUrl(String url) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('supabase_url', url);
+      debugPrint('✅ URL Supabase salvato: $url');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Errore salvataggio URL Supabase: $e');
+      return false;
+    }
+  }
+
+  // Save Supabase Anon Key to SharedPreferences
+  static Future<bool> setSupabaseAnonKey(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('supabase_anon_key', key);
+      debugPrint('✅ Chiave Supabase salvata');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Errore salvataggio chiave Supabase: $e');
+      return false;
+    }
+  }
+
+  // Validate URL format
+  static bool isValidUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.isAbsolute && (uri.scheme == 'http' || uri.scheme == 'https');
+    } catch (e) {
+      return false;
+    }
+  }
+}
+
 class AppModeService {
-  static final SupabaseClient _supabase = Supabase.instance.client;
+  static SupabaseClient? get _supabase {
+    try {
+      return Supabase.instance.client;
+    } catch (e) {
+      debugPrint('⚠️ Supabase non inizializzato: $e');
+      return null;
+    }
+  }
 
   // Get current app mode from SharedPreferences
   static Future<AppMode> getCurrentMode() async {
@@ -368,7 +462,13 @@ class AppModeService {
     try {
       debugPrint('🔄 AppModeService: Invio richiesta job...');
 
-      await _supabase.from('job_requests').insert({
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per submitJobRequest');
+        return false;
+      }
+
+      await supabase.from('job_requests').insert({
         'article_code': articleCode,
         'lot': lot,
         'pieces': pieces,
@@ -387,7 +487,13 @@ class AppModeService {
   // Get pending job requests (for server app)
   static Future<List<JobRequest>> getPendingRequests() async {
     try {
-      final response = await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per getPendingRequests');
+        return [];
+      }
+
+      final response = await supabase
           .from('job_requests')
           .select()
           .eq('status', 'pending')
@@ -405,7 +511,13 @@ class AppModeService {
   // Mark job request as processing
   static Future<bool> markRequestProcessing(String requestId) async {
     try {
-      await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per markRequestProcessing');
+        return false;
+      }
+
+      await supabase
           .from('job_requests')
           .update({
             'status': 'processing',
@@ -424,7 +536,13 @@ class AppModeService {
   // Mark job request as completed
   static Future<bool> markRequestCompleted(String requestId) async {
     try {
-      await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per markRequestCompleted');
+        return false;
+      }
+
+      await supabase
           .from('job_requests')
           .update({
             'status': 'completed',
@@ -443,7 +561,13 @@ class AppModeService {
   // Mark job request as failed
   static Future<bool> markRequestFailed(String requestId, String errorMessage) async {
     try {
-      await _supabase
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ AppModeService: Supabase non inizializzato per markRequestFailed');
+        return false;
+      }
+
+      await supabase
           .from('job_requests')
           .update({
             'status': 'failed',
@@ -462,7 +586,13 @@ class AppModeService {
 
   // Listen for real-time changes in job_requests (for server app)
   static Stream<List<JobRequest>> listenToPendingRequests() {
-    return _supabase
+    final supabase = _supabase;
+    if (supabase == null) {
+      debugPrint('❌ AppModeService: Supabase non inizializzato per listenToPendingRequests');
+      return Stream.value([]);
+    }
+
+    return supabase
         .from('job_requests')
         .stream(primaryKey: ['id'])
         .eq('status', 'pending')
@@ -474,7 +604,13 @@ class AppModeService {
 
   // Listen for real-time changes in quality_monitoring (for remote apps)
   static Stream<List<Map<String, dynamic>>> listenToQualityData() {
-    return _supabase
+    final supabase = _supabase;
+    if (supabase == null) {
+      debugPrint('❌ AppModeService: Supabase non inizializzato per listenToQualityData');
+      return Stream.value([]);
+    }
+
+    return supabase
         .from('quality_monitoring')
         .stream(primaryKey: ['id'])
         .order('timestamp', ascending: false)
@@ -485,15 +621,38 @@ class AppModeService {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment variables
-  await dotenv.load(fileName: ".env");
+  print('🚀 Avvio applicazione...');
 
-  // Initialize Supabase
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-  );
+  // Load environment variables with error handling
+  try {
+    await dotenv.load(fileName: ".env");
+    print('✅ File .env caricato');
+  } catch (e) {
+    print('⚠️ Errore caricamento .env: $e');
+    print('📱 App continua senza configurazione database');
+  }
 
+  // Initialize Supabase with timeout and error handling
+  try {
+    // Usa le impostazioni salvate dall'utente o fallback al .env
+    final supabaseUrl = await SupabaseConfigService.getSupabaseUrl();
+    final supabaseKey = await SupabaseConfigService.getSupabaseAnonKey();
+
+    if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
+      await Supabase.initialize(
+        url: supabaseUrl,
+        anonKey: supabaseKey,
+      ).timeout(const Duration(seconds: 5));
+      print('✅ Supabase inizializzato: $supabaseUrl');
+    } else {
+      print('⚠️ Configurazione Supabase mancante');
+    }
+  } catch (e) {
+    print('⚠️ Errore inizializzazione Supabase: $e');
+    print('📱 App continua in modalità offline');
+  }
+
+  print('🎯 Avvio interfaccia utente...');
   runApp(const JobScheduleApp());
 }
 
@@ -640,7 +799,14 @@ class MainTabView extends StatefulWidget {
 
 class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin {
   late TabController _tabController;
-  final SupabaseClient _supabase = Supabase.instance.client;
+  SupabaseClient? get _supabase {
+    try {
+      return Supabase.instance.client;
+    } catch (e) {
+      debugPrint('⚠️ Supabase non inizializzato: $e');
+      return null;
+    }
+  }
   AppMode _currentMode = AppMode.server;
 
   @override
@@ -661,8 +827,21 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
 
   Future<void> _testDatabaseConnection() async {
     try {
+      final supabase = _supabase;
+      if (supabase == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Supabase non inizializzato'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
       // Test connection by attempting to access the auth endpoint
-      await _supabase.auth.getUser();
+      await supabase.auth.getUser();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -706,6 +885,149 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
           );
         }
       }
+    }
+  }
+
+  Future<void> _showDatabaseConfigDialog() async {
+    final urlController = TextEditingController();
+    final keyController = TextEditingController();
+
+    // Carica i valori attuali
+    final currentUrl = await SupabaseConfigService.getSupabaseUrl();
+    final currentKey = await SupabaseConfigService.getSupabaseAnonKey();
+
+    urlController.text = currentUrl;
+    keyController.text = currentKey;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(PhosphorIcons.wrench(), color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            const Text('Configurazione Database'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Configura l\'URL e la chiave del database Supabase:',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: urlController,
+                decoration: const InputDecoration(
+                  labelText: 'URL Supabase',
+                  hintText: 'http://192.168.1.225:8000',
+                  prefixIcon: Icon(Icons.link),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: keyController,
+                decoration: const InputDecoration(
+                  labelText: 'Chiave Anonima',
+                  hintText: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+                  prefixIcon: Icon(Icons.key),
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 16, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text('Nota:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                      ],
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Riavvia l\'app dopo aver modificato la configurazione per applicare le modifiche.',
+                      style: TextStyle(fontSize: 12, color: Colors.blue),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final url = urlController.text.trim();
+              final key = keyController.text.trim();
+
+              if (url.isEmpty || key.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ URL e chiave sono obbligatori'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              if (!SupabaseConfigService.isValidUrl(url)) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ URL non valido'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+
+              // Salva le configurazioni
+              final urlSaved = await SupabaseConfigService.setSupabaseUrl(url);
+              final keySaved = await SupabaseConfigService.setSupabaseAnonKey(key);
+
+              if (urlSaved && keySaved) {
+                Navigator.of(context).pop(true);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('❌ Errore nel salvataggio della configurazione'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Salva'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Configurazione database salvata. Riavvia l\'app per applicare le modifiche.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+        ),
+      );
     }
   }
 
@@ -867,6 +1189,8 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
             onSelected: (value) {
               if (value == 'settings') {
                 _showAppModeSettings();
+              } else if (value == 'configure_db') {
+                _showDatabaseConfigDialog();
               } else if (value == 'test_db') {
                 _testDatabaseConnection();
               }
@@ -936,6 +1260,16 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                 ),
               ),
               PopupMenuItem(
+                value: 'configure_db',
+                child: Row(
+                  children: [
+                    Icon(PhosphorIcons.wrench(), size: 16),
+                    const SizedBox(width: 8),
+                    const Text('Configura Database'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'test_db',
                 child: Row(
                   children: [
@@ -968,11 +1302,23 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
         controller: _tabController,
         children: [
           _currentMode == AppMode.server
-              ? const JobScheduleHomePage()
-              : const RemoteJobRequestPage(),
+              ? ((){
+                  debugPrint('🏠 MainTabView - Creating JobScheduleHomePage for server mode');
+                  return const JobScheduleHomePage();
+                }())
+              : ((){
+                  debugPrint('📱 MainTabView - Creating RemoteJobRequestPage for remote mode');
+                  return const RemoteJobRequestPage();
+                }()),
           _currentMode == AppMode.server
-              ? const QualityMonitoringPage()
-              : const RemoteQualityDashboard(),
+              ? ((){
+                  debugPrint('📊 MainTabView - Creating QualityMonitoringPage for server mode');
+                  return const QualityMonitoringPage();
+                }())
+              : ((){
+                  debugPrint('📈 MainTabView - Creating RemoteQualityDashboard for remote mode');
+                  return const RemoteQualityDashboard();
+                }()),
         ],
       ),
     );
@@ -983,7 +1329,10 @@ class JobScheduleHomePage extends StatefulWidget {
   const JobScheduleHomePage({super.key});
 
   @override
-  State<JobScheduleHomePage> createState() => _JobScheduleHomePageState();
+  State<JobScheduleHomePage> createState() {
+    debugPrint('🏠 JobScheduleHomePage.createState() - Creating state');
+    return _JobScheduleHomePageState();
+  }
 }
 
 class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
