@@ -1,0 +1,145 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Primary gradient (purple theme) -->
+    <linearGradient id="primaryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366F1"/>
+      <stop offset="50%" style="stop-color:#7C3AED"/>
+      <stop offset="100%" style="stop-color:#8B5CF6"/>
+    </linearGradient>
+    
+    <!-- Document gradient -->
+    <linearGradient id="documentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFFFFF"/>
+      <stop offset="100%" style="stop-color:#F8FAFC"/>
+    </linearGradient>
+    
+    <!-- Schedule lines gradient -->
+    <linearGradient id="scheduleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366F1"/>
+      <stop offset="100%" style="stop-color:#8B5CF6"/>
+    </linearGradient>
+    
+    <!-- Shadow -->
+    <radialGradient id="shadowGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#0F172A;stop-opacity:0"/>
+      <stop offset="100%" style="stop-color:#0F172A;stop-opacity:0.15"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background with rounded corners -->
+  <rect width="1024" height="1024" rx="200" fill="url(#primaryGradient)"/>
+  
+  <!-- Subtle inner shadow -->
+  <rect x="40" y="40" width="944" height="944" rx="160" fill="url(#shadowGradient)"/>
+  
+  <!-- Main document -->
+  <g transform="translate(180, 120)">
+    <!-- Document background -->
+    <rect x="0" y="0" width="500" height="720" rx="36" fill="url(#documentGradient)" 
+          stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+    
+    <!-- Document header with fold -->
+    <path d="M 420 0 L 420 80 L 500 80 L 500 36 A 36 36 0 0 0 464 0 Z" 
+          fill="#E2E8F0" stroke="rgba(99,102,241,0.3)" stroke-width="1"/>
+    <path d="M 420 0 L 420 80 L 500 80" stroke="url(#primaryGradient)" 
+          stroke-width="2" fill="none"/>
+    
+    <!-- Header section -->
+    <rect x="30" y="30" width="200" height="8" rx="4" fill="url(#scheduleGradient)"/>
+    <rect x="30" y="50" width="150" height="6" rx="3" fill="rgba(99,102,241,0.6)"/>
+  </g>
+  
+  <!-- Calendar/Schedule icon in center-right -->
+  <g transform="translate(380, 380)">
+    <!-- Calendar base -->
+    <rect x="0" y="20" width="180" height="200" rx="20" fill="#FFFFFF" 
+          stroke="url(#primaryGradient)" stroke-width="4"/>
+    
+    <!-- Calendar header -->
+    <rect x="0" y="20" width="180" height="50" rx="20" fill="url(#primaryGradient)"/>
+    <rect x="0" y="45" width="180" height="25" fill="url(#primaryGradient)"/>
+    
+    <!-- Calendar rings -->
+    <rect x="35" y="0" width="12" height="40" rx="6" fill="url(#primaryGradient)"/>
+    <rect x="133" y="0" width="12" height="40" rx="6" fill="url(#primaryGradient)"/>
+    
+    <!-- Calendar grid lines -->
+    <g stroke="rgba(99,102,241,0.3)" stroke-width="1" fill="none">
+      <line x1="30" y1="90" x2="150" y2="90"/>
+      <line x1="30" y1="120" x2="150" y2="120"/>
+      <line x1="30" y1="150" x2="150" y2="150"/>
+      <line x1="30" y1="180" x2="150" y2="180"/>
+      
+      <line x1="60" y1="70" x2="60" y2="200"/>
+      <line x1="90" y1="70" x2="90" y2="200"/>
+      <line x1="120" y1="70" x2="120" y2="200"/>
+    </g>
+    
+    <!-- Schedule entries (colored dots) -->
+    <circle cx="45" cy="105" r="6" fill="#10B981"/>
+    <circle cx="75" cy="105" r="6" fill="#F59E0B"/>
+    <circle cx="105" cy="135" r="6" fill="#EF4444"/>
+    <circle cx="135" cy="165" r="6" fill="#8B5CF6"/>
+    <circle cx="75" cy="195" r="6" fill="#06B6D4"/>
+  </g>
+  
+  <!-- Gear/Process icon in left -->
+  <g transform="translate(240, 420)">
+    <!-- Gear circle -->
+    <circle cx="0" cy="0" r="60" fill="url(#primaryGradient)" opacity="0.9"/>
+    
+    <!-- Gear teeth -->
+    <g fill="rgba(255,255,255,0.9)">
+      <!-- 8 teeth around the circle -->
+      <rect x="-4" y="-70" width="8" height="20" rx="4"/>
+      <rect x="45" y="-55" width="20" height="8" rx="4" transform="rotate(45)"/>
+      <rect x="60" y="-4" width="20" height="8" rx="4"/>
+      <rect x="45" y="45" width="20" height="8" rx="4" transform="rotate(135)"/>
+      <rect x="-4" y="50" width="8" height="20" rx="4"/>
+      <rect x="-55" y="45" width="20" height="8" rx="4" transform="rotate(225)"/>
+      <rect x="-80" y="-4" width="20" height="8" rx="4"/>
+      <rect x="-55" y="-55" width="20" height="8" rx="4" transform="rotate(315)"/>
+    </g>
+    
+    <!-- Gear center -->
+    <circle cx="0" cy="0" r="25" fill="#FFFFFF"/>
+    <circle cx="0" cy="0" r="12" fill="url(#primaryGradient)"/>
+  </g>
+  
+  <!-- Schedule lines on document -->
+  <g fill="url(#scheduleGradient)" opacity="0.8">
+    <!-- Job entries -->
+    <rect x="220" y="300" width="280" height="6" rx="3"/>
+    <rect x="220" y="320" width="250" height="4" rx="2"/>
+    <rect x="220" y="335" width="220" height="4" rx="2"/>
+    
+    <rect x="220" y="370" width="260" height="6" rx="3"/>
+    <rect x="220" y="390" width="240" height="4" rx="2"/>
+    <rect x="220" y="405" width="200" height="4" rx="2"/>
+    
+    <rect x="220" y="640" width="300" height="6" rx="3"/>
+    <rect x="220" y="660" width="280" height="4" rx="2"/>
+    <rect x="220" y="675" width="240" height="4" rx="2"/>
+    
+    <rect x="220" y="710" width="270" height="6" rx="3"/>
+    <rect x="220" y="730" width="190" height="4" rx="2"/>
+  </g>
+  
+  <!-- File format indicator (small text area) -->
+  <g transform="translate(580, 580)">
+    <!-- Small document -->
+    <rect x="0" y="0" width="160" height="120" rx="16" fill="#FFFFFF" 
+          stroke="url(#primaryGradient)" stroke-width="2" opacity="0.95"/>
+    
+    <!-- TAB symbols -->
+    <g fill="url(#primaryGradient)" font-family="monospace" font-size="24" font-weight="bold">
+      <text x="20" y="35">CODE</text>
+      <text x="20" y="65">→310→15</text>
+      <text x="20" y="95" font-size="12" opacity="0.7">TAB format</text>
+    </g>
+  </g>
+  
+  <!-- Subtle highlight on top -->
+  <rect x="180" y="120" width="500" height="80" rx="36" 
+        fill="linear-gradient(180deg, rgba(255,255,255,0.4) 0%, transparent 100%)"/>
+</svg>

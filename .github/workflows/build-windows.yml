@@ -1,0 +1,108 @@
+name: Build Windows App (DISABLED)
+
+on:
+  # Temporarily disabled - use windows-only.yml instead
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.35.3'
+        channel: 'stable'
+        cache: true
+        
+    - name: Enable Windows Desktop
+      run: |
+        flutter config --enable-windows-desktop
+        flutter config --no-analytics
+        flutter doctor -v
+      
+    - name: Install dependencies
+      run: |
+        flutter pub get
+        flutter pub deps
+      
+    - name: Run tests
+      run: |
+        if [ -d "test" ]; then
+          flutter test
+        else
+          echo "No test directory found, skipping tests"
+        fi
+      shell: bash
+      
+    - name: Analyze code
+      run: flutter analyze
+      
+    - name: Build Windows app
+      run: |
+        echo "Starting Windows build..."
+        flutter build windows --release --verbose
+        echo "Build completed. Checking output..."
+        dir build\windows\x64\runner\Release\
+        echo "Build artifacts verified."
+      
+    - name: Create Windows installer package
+      shell: pwsh
+      run: |
+        # Create a simple zip package with the executable and dependencies
+        $buildPath = "build\windows\x64\runner\Release"
+        $appName = "JobScheduleGenerator"
+        $version = "1.0.0"
+        
+        # Create distribution directory
+        New-Item -ItemType Directory -Force -Path "dist"
+        
+        # Copy all required files
+        Copy-Item -Recurse -Force "$buildPath\*" "dist\"
+        
+        # Rename the executable to a more user-friendly name
+        Rename-Item "dist\ojob.exe" "dist\JobScheduleGenerator.exe"
+        
+        # Create version info file
+        @"
+        Job Schedule Generator v$version
+        
+        Applicazione per generare file Job Schedule
+        
+        Come usare:
+        1. Esegui JobScheduleGenerator.exe
+        2. Inserisci i dati richiesti
+        3. Seleziona dove salvare il file
+        4. Clicca 'Genera File Job Schedule'
+        
+        Requisiti di sistema:
+        - Windows 10 versione 1903 o successiva
+        - 64-bit
+        
+        Creato con Flutter
+        "@ | Out-File -FilePath "dist\README.txt" -Encoding UTF8
+        
+        # Create zip archive
+        Compress-Archive -Path "dist\*" -DestinationPath "JobScheduleGenerator-Windows-v$version.zip"
+        
+    - name: Upload Windows build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-build
+        path: JobScheduleGenerator-Windows-*.zip
+        retention-days: 30
+        
+    - name: Upload to Release (if tagged)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: JobScheduleGenerator-Windows-*.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

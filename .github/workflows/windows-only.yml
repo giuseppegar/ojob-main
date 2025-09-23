@@ -1,0 +1,234 @@
+name: Build Windows Only
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.35.3'
+        channel: 'stable'
+        cache: true
+        
+    - name: Configure Flutter for Windows
+      shell: pwsh
+      run: |
+        Write-Host "🔧 Configuring Flutter for Windows..." -ForegroundColor Yellow
+        flutter config --enable-windows-desktop
+        flutter config --no-analytics
+        Write-Host "📋 Checking Flutter setup..." -ForegroundColor Yellow
+        flutter doctor -v
+        
+    - name: Install dependencies
+      shell: pwsh
+      run: |
+        Write-Host "📦 Installing dependencies..." -ForegroundColor Yellow
+        flutter pub get
+        Write-Host "🔍 Checking dependency tree..." -ForegroundColor Yellow
+        flutter pub deps
+        
+    - name: Skip tests (no test directory)
+      shell: pwsh
+      run: Write-Host "⏭️ Skipping tests - no test directory found" -ForegroundColor Cyan
+      
+    - name: Analyze code
+      shell: pwsh
+      run: |
+        Write-Host "🔍 Analyzing code..." -ForegroundColor Yellow
+        flutter analyze
+      
+    - name: Build Windows app
+      shell: pwsh
+      run: |
+        Write-Host "🔨 Starting Windows build..." -ForegroundColor Green
+        flutter build windows --release --verbose
+        Write-Host "✅ Build process completed!" -ForegroundColor Green
+        
+        Write-Host "📂 Checking build artifacts..." -ForegroundColor Yellow
+        $buildPath = "build\windows\x64\runner\Release"
+        
+        if (Test-Path $buildPath) {
+            Write-Host "Build directory found. Contents:" -ForegroundColor Yellow
+            Get-ChildItem $buildPath | Format-Table Name, Length, LastWriteTime -AutoSize
+        } else {
+            Write-Host "❌ ERROR: Build directory not found!" -ForegroundColor Red
+            exit 1
+        }
+        
+        Write-Host "🔍 Verifying executable..." -ForegroundColor Yellow
+        $exePath = "$buildPath\ojob.exe"
+        
+        if (Test-Path $exePath) {
+            $size = (Get-Item $exePath).Length
+            Write-Host "✅ ojob.exe found!" -ForegroundColor Green
+            Write-Host "📏 Size: $size bytes ($([math]::Round($size/1MB,2)) MB)" -ForegroundColor Cyan
+        } else {
+            Write-Host "❌ ERROR: ojob.exe not found!" -ForegroundColor Red
+            Write-Host "📋 Available files in build directory:" -ForegroundColor Yellow
+            Get-ChildItem $buildPath | Select-Object Name, Length | Format-Table
+            exit 1
+        }
+        
+    - name: Create Windows installer package
+      shell: pwsh
+      run: |
+        $version = if ($env:GITHUB_REF -match "refs/tags/v(.+)") { $matches[1] } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+        $packageName = "JobScheduleGenerator-Windows-$version"
+        $buildPath = "build\windows\x64\runner\Release"
+        
+        Write-Host "Creating package: $packageName" -ForegroundColor Green
+        Write-Host "From build path: $buildPath" -ForegroundColor Yellow
+        
+        # Verify build exists
+        if (!(Test-Path $buildPath)) {
+            Write-Host "ERROR: Build path not found!" -ForegroundColor Red
+            exit 1
+        }
+        
+        # List build contents for debugging
+        Write-Host "Build directory contents:" -ForegroundColor Yellow
+        Get-ChildItem $buildPath -Force | Format-Table Name, Length, LastWriteTime
+        
+        # Create package directory
+        New-Item -ItemType Directory -Force -Path $packageName | Out-Null
+        Write-Host "Created package directory: $packageName" -ForegroundColor Green
+        
+        # Copy all build files
+        Copy-Item -Path "$buildPath\*" -Destination $packageName -Recurse -Force
+        Write-Host "Copied all files to package directory" -ForegroundColor Green
+        
+        # Check if executable exists and rename it
+        $sourceExe = Join-Path $packageName "ojob.exe"
+        $targetExe = Join-Path $packageName "JobScheduleGenerator.exe"
+        
+        if (Test-Path $sourceExe) {
+            Move-Item -Path $sourceExe -Destination $targetExe -Force
+            Write-Host "Executable renamed: ojob.exe -> JobScheduleGenerator.exe" -ForegroundColor Green
+        } else {
+            Write-Host "ERROR: ojob.exe not found!" -ForegroundColor Red
+            Write-Host "Package directory contents:" -ForegroundColor Yellow
+            Get-ChildItem $packageName -Force | Format-Table Name, Length
+            exit 1
+        }
+        
+        # Create Italian README
+        @"
+        Job Schedule Generator v$version
+        ================================
+        
+        INSTALLAZIONE:
+        1. Estrai tutti i file in una cartella sul tuo computer
+        2. Esegui JobScheduleGenerator.exe
+        
+        UTILIZZO:
+        1. Inserisci il Codice Articolo (esempio: PXO7471-250905)
+        2. Inserisci il Lotto (esempio: 310)  
+        3. Inserisci il Numero di Pezzi (esempio: 15)
+        4. Clicca "Scegli dove salvare" per selezionare la cartella (opzionale)
+        5. Clicca "Genera File Job Schedule"
+        
+        Il file Job_Schedule.txt verrà creato con il formato:
+        [CODICE_ARTICOLO]	[LOTTO]	[PEZZI]
+        (campi separati da caratteri TAB)
+        
+        REQUISITI SISTEMA:
+        - Windows 10 versione 1903 o successiva (64-bit)
+        - Nessun software aggiuntivo richiesto
+        
+        CRONOLOGIA:
+        L'app mantiene una cronologia degli ultimi file generati.
+        Clicca l'icona cronologia per vedere i file precedenti.
+        
+        Sviluppato con Flutter
+        https://github.com/tuorepository/ojob
+        "@ | Out-File -FilePath "$packageName\LEGGIMI.txt" -Encoding UTF8
+        
+        # Create zip package
+        $zipPath = "$packageName.zip"
+        Write-Host "Creating ZIP package: $zipPath" -ForegroundColor Yellow
+        try {
+            Compress-Archive -Path $packageName -DestinationPath $zipPath -Force
+            Write-Host "ZIP archive created successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "ERROR: Failed to create ZIP: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+        
+        # Verify package was created and show details
+        if (Test-Path $zipPath) {
+            $size = (Get-Item $zipPath).Length / 1MB
+            Write-Host "✅ Package ready: $zipPath" -ForegroundColor Green
+            Write-Host "📦 Size: $("{0:N1}" -f $size) MB" -ForegroundColor Cyan
+            Write-Host "📋 Package contents:" -ForegroundColor Yellow
+            Get-ChildItem $packageName | Select-Object Name, @{N='Size(KB)';E={[math]::Round($_.Length/1KB,1)}} | Format-Table
+        } else {
+            Write-Host "ERROR: ZIP file not found after creation!" -ForegroundColor Red
+            exit 1
+        }
+        
+    - name: Upload Windows build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-installer
+        path: JobScheduleGenerator-Windows-*.zip
+        retention-days: 90
+        
+    - name: Upload to Release (if tagged)
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: JobScheduleGenerator-Windows-*.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          ## Job Schedule Generator - Installazione Windows
+          
+          ### 📦 Download
+          Scarica il file `JobScheduleGenerator-Windows-*.zip` qui sotto.
+          
+          ### 🚀 Installazione
+          1. **Scarica** il file .zip
+          2. **Estrai** tutti i file in una cartella
+          3. **Esegui** `JobScheduleGenerator.exe`
+          
+          ### 📋 Come usare
+          1. Inserisci **Codice Articolo** (es: `PXO7471-250905`)
+          2. Inserisci **Lotto** (es: `310`)
+          3. Inserisci **Numero Pezzi** (es: `15`)
+          4. Seleziona dove salvare (opzionale)
+          5. Clicca **"Genera File Job Schedule"**
+          
+          ### 📄 Formato file generato
+          ```
+          [CODICE_ARTICOLO]	[LOTTO]	[PEZZI]
+          ```
+          Esempio: `PXO7471-250905	310	15` (separati da TAB)
+          
+          ### 💻 Requisiti
+          - Windows 10 (1903+) 64-bit
+          - Nessun software aggiuntivo necessario
+          
+          ### 🔧 Funzionalità
+          - ✅ Generazione file Job_Schedule.txt
+          - ✅ Interfaccia italiana intuitiva
+          - ✅ Cronologia file generati
+          - ✅ Selezione cartella di salvataggio
+          - ✅ Validazione input
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

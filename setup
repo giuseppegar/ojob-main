@@ -1,0 +1,46 @@
+# Setup per App Generatore File Job Schedule
+
+## Descrizione
+
+Applicazione per generare file di testo con formato simile a Job_Schedule.txt contenente:
+
+- Codice articolo
+- Lotto
+- Numero pezzi
+
+## Requisiti Funzionali
+
+1. **Generazione file**: L'app deve generare un file .txt con il formato:
+
+   ```
+   [CODICE_ARTICOLO] [LOTTO] [NUMERO_PEZZI]
+   ```
+
+   Esempio: `PXO7471-250905  310 15`
+
+2. **Selezione percorso**: Possibilità di scegliere dove salvare il file generato
+
+3. **Input utente**: Interfaccia per inserire:
+   - Codice articolo (es. PXO7471-250905)
+   - Lotto (es. 310)
+   - Numero pezzi (es. 15)
+
+## Domande da chiarire
+
+1. **Formato file**: Mantenere esattamente lo stesso formato del Job_Schedule.txt esistente?
+   si
+2. **Nome file**: Permettere di scegliere il nome del file o usare sempre "Job_Schedule.txt"?
+   usare sempre lo stesso
+3. **Piattaforma**: App desktop (Flutter), web, o mobile?
+   tutte
+4. **Validazione**: Controlli sui campi obbligatori?
+   no
+5. **Cronologia**: Salvare una lista dei file generati?
+   si
+
+## Struttura Progetto
+
+- Progetto Flutter esistente in `/Users/macair/development/ordine di lavoro/ojob`
+- File di esempio: `Job_Schedule.txt` con formato `PXO7471-250905  310 15`
+
+fai attenzione a creare acnhe tutte le icone compreso l'icona desckotop, il design e tutto quello che serve.
