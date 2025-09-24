@@ -621,15 +621,15 @@ class AppModeService {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  print('🚀 Avvio applicazione...');
+  debugPrint('🚀 Avvio applicazione...');
 
   // Load environment variables with error handling
   try {
     await dotenv.load(fileName: ".env");
-    print('✅ File .env caricato');
+    debugPrint('✅ File .env caricato');
   } catch (e) {
-    print('⚠️ Errore caricamento .env: $e');
-    print('📱 App continua senza configurazione database');
+    debugPrint('⚠️ Errore caricamento .env: $e');
+    debugPrint('📱 App continua senza configurazione database');
   }
 
   // Initialize Supabase with timeout and error handling
@@ -643,16 +643,16 @@ void main() async {
         url: supabaseUrl,
         anonKey: supabaseKey,
       ).timeout(const Duration(seconds: 5));
-      print('✅ Supabase inizializzato: $supabaseUrl');
+      debugPrint('✅ Supabase inizializzato: $supabaseUrl');
     } else {
-      print('⚠️ Configurazione Supabase mancante');
+      debugPrint('⚠️ Configurazione Supabase mancante');
     }
   } catch (e) {
-    print('⚠️ Errore inizializzazione Supabase: $e');
-    print('📱 App continua in modalità offline');
+    debugPrint('⚠️ Errore inizializzazione Supabase: $e');
+    debugPrint('📱 App continua in modalità offline');
   }
 
-  print('🎯 Avvio interfaccia utente...');
+  debugPrint('🎯 Avvio interfaccia utente...');
   runApp(const JobScheduleApp());
 }
 
@@ -889,12 +889,16 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
   }
 
   Future<void> _showDatabaseConfigDialog() async {
+    if (!mounted) return;
+
     final urlController = TextEditingController();
     final keyController = TextEditingController();
 
     // Carica i valori attuali
     final currentUrl = await SupabaseConfigService.getSupabaseUrl();
     final currentKey = await SupabaseConfigService.getSupabaseAnonKey();
+
+    if (!mounted) return;
 
     urlController.text = currentUrl;
     keyController.text = currentKey;
@@ -1003,6 +1007,8 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
               final urlSaved = await SupabaseConfigService.setSupabaseUrl(url);
               final keySaved = await SupabaseConfigService.setSupabaseAnonKey(key);
 
+              if (!context.mounted) return;
+
               if (urlSaved && keySaved) {
                 Navigator.of(context).pop(true);
               } else {
@@ -1057,7 +1063,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                 color: _currentMode == mode
                     ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
                     : null,
-                child: RadioListTile<AppMode>(
+                child: ListTile(
                   title: Text(
                     mode.label,
                     style: TextStyle(
@@ -1068,17 +1074,16 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                     mode.description,
                     style: const TextStyle(fontSize: 12),
                   ),
-                  value: mode,
-                  groupValue: _currentMode,
-                  onChanged: (AppMode? value) {
-                    if (value != null) {
-                      Navigator.of(context).pop(value);
-                    }
+                  leading: Icon(
+                    _currentMode == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  onTap: () {
+                    Navigator.of(context).pop(mode);
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
                 ),
               ),
-            )).toList(),
+            )),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
@@ -1329,10 +1334,7 @@ class JobScheduleHomePage extends StatefulWidget {
   const JobScheduleHomePage({super.key});
 
   @override
-  State<JobScheduleHomePage> createState() {
-    debugPrint('🏠 JobScheduleHomePage.createState() - Creating state');
-    return _JobScheduleHomePageState();
-  }
+  State<JobScheduleHomePage> createState() => _JobScheduleHomePageState();
 }
 
 class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
@@ -1348,16 +1350,15 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
 
   // Remote job request listener variables
   StreamSubscription<List<JobRequest>>? _jobRequestSubscription;
-  List<JobRequest> _pendingRequests = [];
   AppMode _currentMode = AppMode.server;
 
   // Automatic job file monitoring
   Timer? _jobFileMonitorTimer;
-  Set<String> _processedJobFiles = {}; // Track processed files to avoid duplicates
+  final Set<String> _processedJobFiles = {}; // Track processed files to avoid duplicates
 
   // Simple job request polling every 30 seconds
   Timer? _jobRequestPollingTimer;
-  Set<String> _processedJobRequestIds = {}; // Track processed requests to avoid duplicates
+  final Set<String> _processedJobRequestIds = {}; // Track processed requests to avoid duplicates
 
   // Helper methods for platform detection that work on web
   bool _isMacOS() {
@@ -1483,7 +1484,7 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
           debugPrint('📨 Trovate ${requests.length} richieste job pending');
 
           setState(() {
-            _pendingRequests = requests;
+            // Requests loaded but not stored locally
           });
 
           // Process only new requests we haven't processed before
@@ -1511,7 +1512,7 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
           if (mounted && requests.isNotEmpty) {
             debugPrint('📨 Controllo iniziale: trovate ${requests.length} richieste');
             setState(() {
-              _pendingRequests = requests;
+              // Requests loaded but not stored locally
             });
             for (final request in requests) {
               if (request.status == 'pending' && !_processedJobRequestIds.contains(request.id)) {
@@ -4773,7 +4774,6 @@ class _RemoteJobRequestPageState extends State<RemoteJobRequestPage> {
   final TextEditingController _piecesController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _isSubmitting = false;
-  List<JobRequest> _recentRequests = [];
 
   @override
   void initState() {
@@ -4783,10 +4783,10 @@ class _RemoteJobRequestPageState extends State<RemoteJobRequestPage> {
 
   Future<void> _loadRecentRequests() async {
     try {
-      final requests = await AppModeService.getPendingRequests();
+      await AppModeService.getPendingRequests();
       if (mounted) {
         setState(() {
-          _recentRequests = requests;
+          // Recent requests loaded but not stored locally
         });
       }
     } catch (e) {
