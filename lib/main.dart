@@ -3408,9 +3408,6 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
           // Process the job automatically
           await _generateJobFile();
 
-          // Move processed file to a 'processed' subdirectory
-          await _moveProcessedFile(jobFile);
-
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -3435,26 +3432,6 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
     }
   }
 
-  // Move processed file to avoid reprocessing
-  Future<void> _moveProcessedFile(File jobFile) async {
-    try {
-      final directory = jobFile.parent;
-      final processedDir = Directory(path_lib.join(directory.path, 'processed'));
-
-      if (!await processedDir.exists()) {
-        await processedDir.create();
-      }
-
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final newPath = path_lib.join(processedDir.path, 'job_schedule_$timestamp.txt');
-      await jobFile.rename(newPath);
-
-      debugPrint('📁 Moved processed file to: $newPath');
-    } catch (e) {
-      debugPrint('⚠️ Could not move processed file: $e');
-      // Don't fail the whole process if we can't move the file
-    }
-  }
 
   @override
   void dispose() {

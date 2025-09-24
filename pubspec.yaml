@@ -63,6 +63,9 @@ dependencies:
   # Environment variables
   flutter_dotenv: ^5.1.0
 
+  # URL launcher (required for Supabase)
+  url_launcher: ^6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
