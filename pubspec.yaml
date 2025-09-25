@@ -66,6 +66,15 @@ dependencies:
   # URL launcher (required for Supabase)
   url_launcher: ^6.3.2
 
+  # Platform detection and device info
+  device_info_plus: ^10.1.0
+
+  # Windows shell integration for virtual keyboard
+  win32: ^5.7.1
+
+  # State management
+  provider: ^6.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

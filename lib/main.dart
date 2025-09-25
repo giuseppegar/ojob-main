@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:phosphor_flutter/phosphor_flutter.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
@@ -13,15 +15,13 @@ import 'package:path/path.dart' as path_lib;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-// App Mode Enum for Server/Remote functionality
-enum AppMode {
-  server('Server', 'Macchina principale - Elabora file e richieste'),
-  remote('Remote', 'Controllo remoto - Visualizza dati e invia richieste');
+// Import new services
+import 'models/app_state.dart';
+import 'services/notification_service.dart';
+import 'services/keyboard_service.dart';
+import 'services/sync_service.dart';
+import 'services/settings_service.dart';
 
-  const AppMode(this.label, this.description);
-  final String label;
-  final String description;
-}
 
 // Job Request class for remote communication
 class JobRequest {
@@ -369,55 +369,6 @@ class DatabaseService {
 }
 
 // App Mode Service for managing Server/Remote functionality
-class SupabaseConfigService {
-  // Get stored Supabase URL from SharedPreferences
-  static Future<String> getSupabaseUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('supabase_url') ?? dotenv.env['SUPABASE_URL'] ?? 'http://192.168.1.225:8000';
-  }
-
-  // Get stored Supabase Anon Key from SharedPreferences
-  static Future<String> getSupabaseAnonKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('supabase_anon_key') ?? dotenv.env['SUPABASE_ANON_KEY'] ?? '';
-  }
-
-  // Save Supabase URL to SharedPreferences
-  static Future<bool> setSupabaseUrl(String url) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('supabase_url', url);
-      debugPrint('✅ URL Supabase salvato: $url');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Errore salvataggio URL Supabase: $e');
-      return false;
-    }
-  }
-
-  // Save Supabase Anon Key to SharedPreferences
-  static Future<bool> setSupabaseAnonKey(String key) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('supabase_anon_key', key);
-      debugPrint('✅ Chiave Supabase salvata');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Errore salvataggio chiave Supabase: $e');
-      return false;
-    }
-  }
-
-  // Validate URL format
-  static bool isValidUrl(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.isAbsolute && (uri.scheme == 'http' || uri.scheme == 'https');
-    } catch (e) {
-      return false;
-    }
-  }
-}
 
 class AppModeService {
   static SupabaseClient? get _supabase {
@@ -493,17 +444,25 @@ class AppModeService {
         return [];
       }
 
+      debugPrint('🔍 AppModeService: Esecuzione query job_requests...');
+
       final response = await supabase
           .from('job_requests')
           .select()
           .eq('status', 'pending')
-          .order('requested_at', ascending: true);
+          .order('requested_at', ascending: true)
+          .timeout(const Duration(seconds: 10));
+
+      debugPrint('✅ AppModeService: Query completata, ${response.length} risultati');
 
       return List<JobRequest>.from(
         response.map((item) => JobRequest.fromJson(item))
       );
     } catch (e) {
       debugPrint('❌ AppModeService: Errore recupero richieste: $e');
+      if (e.toString().contains('timeout')) {
+        debugPrint('⚠️ AppModeService: Timeout connessione database - controllare configurazione');
+      }
       return [];
     }
   }
@@ -623,6 +582,15 @@ void main() async {
 
   debugPrint('🚀 Avvio applicazione...');
 
+  // Initialize services
+  await KeyboardService.instance.initialize();
+
+  // TEMPORARY: Force reset to local database for debugging
+  if (kDebugMode) {
+    debugPrint('🔧 DEBUG: Forzando reset a database locale...');
+    await SettingsService.instance.resetToLocalDatabase();
+  }
+
   // Load environment variables with error handling
   try {
     await dotenv.load(fileName: ".env");
@@ -635,25 +603,65 @@ void main() async {
   // Initialize Supabase with timeout and error handling
   try {
     // Usa le impostazioni salvate dall'utente o fallback al .env
-    final supabaseUrl = await SupabaseConfigService.getSupabaseUrl();
-    final supabaseKey = await SupabaseConfigService.getSupabaseAnonKey();
+    final supabaseUrl = await SettingsService.instance.getSupabaseUrl();
+    final supabaseKey = await SettingsService.instance.getSupabaseAnonKey();
+
+    debugPrint('🔧 Configurazione database: $supabaseUrl');
 
     if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty) {
       await Supabase.initialize(
         url: supabaseUrl,
         anonKey: supabaseKey,
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 10));
       debugPrint('✅ Supabase inizializzato: $supabaseUrl');
     } else {
       debugPrint('⚠️ Configurazione Supabase mancante');
     }
   } catch (e) {
     debugPrint('⚠️ Errore inizializzazione Supabase: $e');
-    debugPrint('📱 App continua in modalità offline');
+
+    // Se c'è un timeout, prova a resettare alle credenziali locali
+    if (e.toString().contains('timeout') || e.toString().contains('Operation timed out')) {
+      debugPrint('🔄 Tentativo reset a database locale...');
+      try {
+        await SettingsService.instance.resetToLocalDatabase();
+        final localUrl = await SettingsService.instance.getSupabaseUrl();
+        final localKey = await SettingsService.instance.getSupabaseAnonKey();
+
+        await Supabase.initialize(
+          url: localUrl,
+          anonKey: localKey,
+        ).timeout(const Duration(seconds: 5));
+        debugPrint('✅ Supabase inizializzato con credenziali locali: $localUrl');
+      } catch (localError) {
+        debugPrint('❌ Errore anche con credenziali locali: $localError');
+        debugPrint('📱 App continua in modalità offline');
+      }
+    } else {
+      debugPrint('📱 App continua in modalità offline');
+    }
   }
 
   debugPrint('🎯 Avvio interfaccia utente...');
-  runApp(const JobScheduleApp());
+
+  // Create app state
+  final appState = AppState();
+
+  // Load settings
+  await SettingsService.instance.loadSettings(appState);
+
+  // Set Windows touch device status
+  appState.setWindowsTouchDevice(KeyboardService.instance.isWindowsTouchDevice);
+
+  // Initialize sync service
+  await SyncService.instance.initialize(appState);
+
+  runApp(
+    ChangeNotifierProvider.value(
+      value: appState,
+      child: const JobScheduleApp(),
+    ),
+  );
 }
 
 class JobScheduleApp extends StatelessWidget {
@@ -809,18 +817,32 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
   }
   AppMode _currentMode = AppMode.server;
 
+  bool _isValidUrl(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.isAbsolute && (uri.scheme == 'http' || uri.scheme == 'https');
+    } catch (e) {
+      return false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadCurrentMode();
+
+    // Initialize notification service with context
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      NotificationService.instance.setContext(context);
+    });
   }
 
   Future<void> _loadCurrentMode() async {
-    final mode = await AppModeService.getCurrentMode();
+    final appState = Provider.of<AppState>(context, listen: false);
     if (mounted) {
       setState(() {
-        _currentMode = mode;
+        _currentMode = appState.currentMode;
       });
     }
   }
@@ -829,41 +851,19 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     try {
       final supabase = _supabase;
       if (supabase == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ Supabase non inizializzato'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        // Notification disabled
         return;
       }
 
       // Test connection by attempting to access the auth endpoint
       await supabase.auth.getUser();
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Connessione al database riuscita!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      // Notification disabled
     } catch (e) {
       // Check if it's an AuthSessionMissing error (which means server is reachable)
       if (e.toString().contains('AuthSessionMissing') ||
           e.toString().contains('No session available')) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Server Supabase raggiungibile! (Nessun login richiesto)'),
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 5),
-            ),
-          );
-        }
+        // Notification disabled
       } else {
         // Real connection error
         if (mounted) {
@@ -876,13 +876,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
             errorMsg = 'Errore: ${errorMsg.split(':').first}';
           }
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ $errorMsg'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 8),
-            ),
-          );
+          // Notification disabled
         }
       }
     }
@@ -895,15 +889,15 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     final keyController = TextEditingController();
 
     // Carica i valori attuali
-    final currentUrl = await SupabaseConfigService.getSupabaseUrl();
-    final currentKey = await SupabaseConfigService.getSupabaseAnonKey();
+    final currentUrl = await SettingsService.instance.getSupabaseUrl();
+    final currentKey = await SettingsService.instance.getSupabaseAnonKey();
 
     if (!mounted) return;
 
     urlController.text = currentUrl;
     keyController.text = currentKey;
 
-    final result = await showDialog<bool>(
+    await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
@@ -975,6 +969,18 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
         ),
         actions: [
           TextButton(
+            onPressed: () async {
+              // Reset to local database configuration
+              await SettingsService.instance.resetToLocalDatabase();
+              final localUrl = await SettingsService.instance.getSupabaseUrl();
+              final localKey = await SettingsService.instance.getSupabaseAnonKey();
+
+              urlController.text = localUrl;
+              keyController.text = localKey;
+            },
+            child: const Text('Reset Locale'),
+          ),
+          TextButton(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Annulla'),
           ),
@@ -984,41 +990,22 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
               final key = keyController.text.trim();
 
               if (url.isEmpty || key.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('❌ URL e chiave sono obbligatori'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                // Notification disabled
                 return;
               }
 
-              if (!SupabaseConfigService.isValidUrl(url)) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('❌ URL non valido'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+              if (!_isValidUrl(url)) {
+                // Notification disabled
                 return;
               }
 
               // Salva le configurazioni
-              final urlSaved = await SupabaseConfigService.setSupabaseUrl(url);
-              final keySaved = await SupabaseConfigService.setSupabaseAnonKey(key);
+              await SettingsService.instance.setSupabaseUrl(url);
+              await SettingsService.instance.setSupabaseAnonKey(key);
 
               if (!context.mounted) return;
 
-              if (urlSaved && keySaved) {
-                Navigator.of(context).pop(true);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('❌ Errore nel salvataggio della configurazione'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
+              Navigator.of(context).pop(true);
             },
             child: const Text('Salva'),
           ),
@@ -1026,65 +1013,99 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
       ),
     );
 
-    if (result == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Configurazione database salvata. Riavvia l\'app per applicare le modifiche.'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 5),
-        ),
-      );
-    }
+    // Notification disabled
   }
 
   Future<void> _showAppModeSettings() async {
-    final selectedMode = await showDialog<AppMode>(
+    final appState = Provider.of<AppState>(context, listen: false);
+    bool tempAutoKeyboard = appState.isAutoKeyboardEnabled;
+    AppMode tempSelectedMode = appState.currentMode;
+
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(PhosphorIcons.gear(), color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 8),
-            const Text('Modalità Applicazione'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Seleziona la modalità di funzionamento dell\'applicazione:',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            ...AppMode.values.map((mode) => Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: Card(
-                elevation: _currentMode == mode ? 3 : 1,
-                color: _currentMode == mode
-                    ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
-                    : null,
-                child: ListTile(
-                  title: Text(
-                    mode.label,
-                    style: TextStyle(
-                      fontWeight: _currentMode == mode ? FontWeight.bold : FontWeight.normal,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(PhosphorIcons.gear(), color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              const Text('Impostazioni Applicazione'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Modalità di funzionamento:',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                ...AppMode.values.map((mode) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Card(
+                    elevation: tempSelectedMode == mode ? 3 : 1,
+                    color: tempSelectedMode == mode
+                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
+                        : null,
+                    child: ListTile(
+                      title: Text(
+                        mode.label,
+                        style: TextStyle(
+                          fontWeight: tempSelectedMode == mode ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      subtitle: Text(
+                        mode.description,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      leading: Icon(
+                        tempSelectedMode == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      onTap: () {
+                        setState(() {
+                          tempSelectedMode = mode;
+                        });
+                      },
                     ),
                   ),
-                  subtitle: Text(
-                    mode.description,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  leading: Icon(
-                    _currentMode == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).pop(mode);
-                  },
+                )),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 16),
+                const Text(
+                  'Impostazioni dispositivo:',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
-              ),
-            )),
-            const SizedBox(height: 8),
+                const SizedBox(height: 12),
+                if (appState.isWindowsTouchDevice) ...[
+                  Card(
+                    child: SwitchListTile(
+                      title: const Text('Tastiera automatica'),
+                      subtitle: const Text('Apri automaticamente la tastiera virtuale su dispositivi touch Windows'),
+                      value: tempAutoKeyboard,
+                      onChanged: (value) {
+                        setState(() {
+                          tempAutoKeyboard = value;
+                        });
+                      },
+                      secondary: Icon(PhosphorIcons.keyboard(), color: Theme.of(context).colorScheme.primary),
+                    ),
+                  ),
+                ] else ...[
+                  Card(
+                    color: Colors.grey.withValues(alpha: 0.1),
+                    child: ListTile(
+                      title: const Text('Tastiera automatica'),
+                      subtitle: const Text('Disponibile solo su dispositivi Windows touch'),
+                      leading: Icon(PhosphorIcons.keyboard(), color: Colors.grey),
+                      enabled: false,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -1105,50 +1126,48 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                 ],
               ),
             ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annulla'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop({
+                  'selectedMode': tempSelectedMode,
+                  'autoKeyboard': tempAutoKeyboard,
+                });
+              },
+              child: const Text('Salva'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Annulla'),
-          ),
-        ],
       ),
     );
 
-    if (selectedMode != null && selectedMode != _currentMode) {
-      final success = await AppModeService.setMode(selectedMode);
-      if (success && mounted) {
-        setState(() {
-          _currentMode = selectedMode;
-        });
+    if (result != null) {
+      final selectedMode = result['selectedMode'] as AppMode;
+      final autoKeyboard = result['autoKeyboard'] as bool;
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Modalità cambiata in ${selectedMode.label}'),
-            backgroundColor: Colors.green,
-            action: SnackBarAction(
-              label: 'Riavvia',
-              onPressed: () {
-                // Note: In a real app, you might want to restart the app here
-                // For now, we just show a message
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('💡 Riavvia l\'app manualmente per applicare tutte le modifiche'),
-                    duration: Duration(seconds: 3),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
-      } else if (!success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('❌ Errore nel salvare la modalità'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      // Save auto keyboard setting
+      if (autoKeyboard != appState.isAutoKeyboardEnabled) {
+        await SettingsService.instance.setAutoKeyboardEnabled(autoKeyboard);
+        appState.setAutoKeyboard(autoKeyboard);
+      }
+
+      // Save mode setting
+      if (selectedMode != _currentMode) {
+        await SettingsService.instance.setAppMode(selectedMode);
+        appState.setMode(selectedMode);
+
+        if (mounted) {
+          setState(() {
+            _currentMode = selectedMode;
+          });
+        }
       }
     }
   }
@@ -1439,10 +1458,10 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
   }
 
   Future<void> _loadCurrentMode() async {
-    final mode = await AppModeService.getCurrentMode();
+    final appState = Provider.of<AppState>(context, listen: false);
     if (mounted) {
       setState(() {
-        _currentMode = mode;
+        _currentMode = appState.currentMode;
       });
 
       // Start listening for job requests and file monitoring only in server mode
@@ -1547,15 +1566,7 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
         await AppModeService.markRequestCompleted(request.id);
         debugPrint('✅ Job request completed: ${request.id}');
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ Job remoto completato: ${request.articleCode}'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
+        // Notification disabled
       } else {
         // Mark as failed
         await AppModeService.markRequestFailed(request.id, 'Errore generazione file');
@@ -2120,24 +2131,7 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
   }
 
   void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            fontWeight: FontWeight.w500,
-            color: Colors.white,
-          ),
-        ),
-        backgroundColor: color,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    // Notifications disabled
   }
 
   Widget _buildInputField({
@@ -3408,27 +3402,12 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
           // Process the job automatically
           await _generateJobFile();
 
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('✅ File job processato automaticamente: $articleCode'),
-                backgroundColor: Colors.green,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
+          // Notification disabled
         }
       }
     } catch (e) {
       debugPrint('❌ Error processing job file: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Errore nel processare il file job: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Notification disabled
     }
   }
 
@@ -3462,10 +3441,9 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
   bool _isLoading = false;
   DateTime? _lastFileModified;
 
-  // Manual counter variables
+  // Manual counter variables (using global state now)
   int _manualGoodPieces = 0;
   int _manualRejectedPieces = 0;
-  DateTime? _manualCounterStartTime;
 
   // Baseline values when manual counter was reset
   int _baselineGoodPieces = 0;
@@ -3475,6 +3453,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
   void initState() {
     super.initState();
     _loadMonitoringPath();
+    _loadCounterState();
   }
 
   @override
@@ -3485,6 +3464,16 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
 
   bool _isMacOS() {
     return Platform.isMacOS;
+  }
+
+  void _loadCounterState() {
+    final appState = Provider.of<AppState>(context, listen: false);
+    if (appState.manualCounterStartTime != null) {
+      setState(() {
+        _baselineGoodPieces = appState.manualPiecesAtStart;
+        _baselineRejectedPieces = appState.manualPartsAtStart;
+      });
+    }
   }
 
   Future<void> _loadMonitoringPath() async {
@@ -3613,13 +3602,14 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
       // Salva i valori attuali come baseline
       _baselineGoodPieces = _currentData?.goodPieces ?? 0;
       _baselineRejectedPieces = _currentData?.rejectedPieces ?? 0;
-      _manualCounterStartTime = DateTime.now();
 
       // I valori manuali partiranno da 0 (verranno calcolati nella prossima lettura)
       _manualGoodPieces = 0;
       _manualRejectedPieces = 0;
     });
-    _showSnackBar('🔄 Contatore manuale azzerato', const Color(0xFF059669));
+
+    // Start counter using SyncService
+    SyncService.instance.startCounter(_baselineGoodPieces, _baselineRejectedPieces, _currentFileName ?? '');
   }
 
   int get _manualTotalPieces => _manualGoodPieces + _manualRejectedPieces;
@@ -3731,7 +3721,8 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
           _currentData = data;
 
           // Aggiorna i contatori manuali se il reset è stato fatto
-          if (_manualCounterStartTime != null) {
+          final appState = Provider.of<AppState>(context, listen: false);
+          if (appState.manualCounterStartTime != null) {
             _manualGoodPieces = data.goodPieces - _baselineGoodPieces;
             _manualRejectedPieces = data.rejectedPieces - _baselineRejectedPieces;
 
@@ -3964,24 +3955,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
   }
 
   void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            fontWeight: FontWeight.w500,
-            color: Colors.white,
-          ),
-        ),
-        backgroundColor: color,
-        duration: const Duration(seconds: 3),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        margin: const EdgeInsets.all(16),
-      ),
-    );
+    // Notifications disabled
   }
 
   @override
@@ -4258,7 +4232,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
                           ),
                         ),
                         const Spacer(),
-                        if (_manualCounterStartTime != null)
+                        if (Provider.of<AppState>(context).manualCounterStartTime != null)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
@@ -4266,7 +4240,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'Avviato ${_manualCounterStartTime!.hour.toString().padLeft(2, '0')}:${_manualCounterStartTime!.minute.toString().padLeft(2, '0')}',
+                              'Avviato ${Provider.of<AppState>(context).manualCounterStartTime!.hour.toString().padLeft(2, '0')}:${Provider.of<AppState>(context).manualCounterStartTime!.minute.toString().padLeft(2, '0')}',
                               style: TextStyle(
                                 color: Colors.purple.shade700,
                                 fontSize: 12,
@@ -4793,30 +4767,13 @@ class _RemoteJobRequestPageState extends State<RemoteJobRequestPage> {
           _piecesController.clear();
           _loadRecentRequests();
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Richiesta job inviata con successo!'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          // Notification disabled
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ Errore nell\'invio della richiesta'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          // Notification disabled
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Errore: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      // Notification disabled
     } finally {
       if (mounted) {
         setState(() {
