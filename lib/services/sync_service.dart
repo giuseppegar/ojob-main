@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:macos_secure_bookmarks/macos_secure_bookmarks.dart';
 import '../models/app_state.dart';
 
 class SyncService {
@@ -132,12 +136,30 @@ class SyncService {
 
   Future<List<Map<String, dynamic>>> _getPendingRequests() async {
     try {
-      // This is a simplified version - you might need to implement proper Supabase client access
-      // For now, return empty list to avoid errors
-      return [];
+      final supabase = Supabase.instance.client;
+
+      if (kDebugMode) {
+        print('🔍 SyncService: Esecuzione query job_requests...');
+      }
+
+      final response = await supabase
+          .from('job_requests')
+          .select()
+          .eq('status', 'pending')
+          .order('requested_at', ascending: true)
+          .timeout(const Duration(seconds: 10));
+
+      if (kDebugMode) {
+        print('✅ SyncService: Query completata, ${response.length} risultati');
+      }
+
+      return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       if (kDebugMode) {
         print('❌ SyncService: Errore recupero richieste: $e');
+        if (e.toString().contains('timeout')) {
+          print('⚠️ SyncService: Timeout connessione database - controllare configurazione');
+        }
       }
       return [];
     }
@@ -145,14 +167,196 @@ class SyncService {
 
   Future<void> _processJobRequest(Map<String, dynamic> request) async {
     try {
-      // This would contain the job processing logic
-      // Mark as processing, generate file, mark as completed
       if (kDebugMode) {
         print('🔄 SyncService: Processando richiesta ${request['id']}');
+      }
+
+      // Mark as processing
+      await _markRequestProcessing(request['id']);
+
+      // Generate job file
+      final success = await _generateJobFile(
+        request['article_code'],
+        request['lot'],
+        request['pieces']
+      );
+
+      if (success) {
+        // Mark as completed
+        await _markRequestCompleted(request['id']);
+        if (kDebugMode) {
+          print('✅ SyncService: Job remoto completato: ${request['article_code']}');
+        }
+      } else {
+        // Mark as failed
+        await _markRequestFailed(request['id'], 'Errore generazione file');
+        if (kDebugMode) {
+          print('❌ SyncService: Job request fallito: ${request['id']}');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
         print('❌ SyncService: Errore processamento richiesta: $e');
+      }
+      await _markRequestFailed(request['id'], e.toString());
+    }
+  }
+
+  Future<bool> _markRequestProcessing(String requestId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase
+          .from('job_requests')
+          .update({'status': 'processing', 'processed_at': DateTime.now().toIso8601String()})
+          .eq('id', requestId);
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ SyncService: Errore marking processing: $e');
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _markRequestCompleted(String requestId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase
+          .from('job_requests')
+          .update({'status': 'completed'})
+          .eq('id', requestId);
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ SyncService: Errore marking completed: $e');
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _markRequestFailed(String requestId, String errorMessage) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase
+          .from('job_requests')
+          .update({'status': 'failed', 'error_message': errorMessage})
+          .eq('id', requestId);
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ SyncService: Errore marking failed: $e');
+      }
+      return false;
+    }
+  }
+
+  Future<bool> _generateJobFile(String articleCode, String lot, int pieces) async {
+    bool isAccessingSecureResource = false;
+
+    try {
+      // Prepare content
+      final String content = '$articleCode\t$lot\t$pieces';
+
+      // Validate TAB format
+      final tabCount = '\t'.allMatches(content).length;
+      if (tabCount != 2) {
+        if (kDebugMode) {
+          print('❌ SyncService: Invalid format: TAB count ($tabCount/2)');
+        }
+        return false;
+      }
+
+      final String fileName = 'Job_Schedule.txt';
+      String? finalPath;
+
+      // Get saved path or use Documents as fallback
+      final savedPath = await _getSaveLocationPath();
+
+      if (savedPath != null && savedPath.isNotEmpty) {
+        finalPath = '$savedPath/$fileName';
+
+        // Handle macOS secure bookmarks if available
+        if (_isMacOS() && await _hasSecureBookmark()) {
+          try {
+            isAccessingSecureResource = await _startSecureBookmarkAccess();
+            if (!isAccessingSecureResource) {
+              if (kDebugMode) {
+                print('❌ SyncService: Failed to start accessing secure resource');
+              }
+              return false;
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print('❌ SyncService: Error with secure bookmark: $e');
+            }
+            return false;
+          }
+        }
+      } else {
+        // Use Documents directory as fallback
+        try {
+          final directory = await getApplicationDocumentsDirectory();
+          finalPath = '${directory.path}/$fileName';
+        } catch (e) {
+          if (kDebugMode) {
+            print('❌ SyncService: Error getting documents directory: $e');
+          }
+          return false;
+        }
+      }
+
+
+      // Write file with flush to ensure it's written immediately
+      final file = File(finalPath);
+      await file.writeAsString(content, flush: true);
+
+      // Save to history
+      final String historyEntry = '$articleCode - $lot - $pieces';
+      await _saveToHistory(historyEntry);
+
+      // Save to database if possible
+      await _saveToDatabase(articleCode, lot, pieces);
+
+      if (kDebugMode) {
+        print('✅ SyncService: Job file generated successfully: $finalPath');
+      }
+
+      return true;
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ SyncService: Error generating job file: $e');
+      }
+      return false;
+    } finally {
+      // Stop accessing secure resource on macOS if it was started
+      if (_isMacOS() && isAccessingSecureResource) {
+        await _stopSecureBookmarkAccess();
+      }
+    }
+  }
+
+  Future<String?> _getSaveLocationPath() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('saved_path');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _saveToDatabase(String articleCode, String lot, int pieces) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase.from('job_schedules').insert({
+        'article_code': articleCode,
+        'lot': lot,
+        'pieces': pieces,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      // Non critical error, file is still generated
+      if (kDebugMode) {
+        print('⚠️ SyncService: Errore salvataggio database: $e');
       }
     }
   }
@@ -242,4 +446,76 @@ class SyncService {
     _appState!.startManualCounter(now, pieces, parts, machine);
     await _saveCounterState();
   }
+
+  // Helper methods for platform detection
+  bool _isMacOS() {
+    try {
+      return Platform.isMacOS;
+    } catch (e) {
+      // On web, Platform is not available, assume false
+      return false;
+    }
+  }
+
+  // Secure bookmark helper methods
+  Future<bool> _hasSecureBookmark() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bookmark = prefs.getString('secure_bookmark');
+      return bookmark != null && bookmark.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> _startSecureBookmarkAccess() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bookmarkData = prefs.getString('secure_bookmark');
+      if (bookmarkData == null) return false;
+
+      final secureBookmarks = SecureBookmarks();
+      final resolvedUrl = await secureBookmarks.resolveBookmark(bookmarkData);
+      return await secureBookmarks.startAccessingSecurityScopedResource(resolvedUrl);
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ SyncService: Error starting secure bookmark access: $e');
+      }
+      return false;
+    }
+  }
+
+  Future<void> _stopSecureBookmarkAccess() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bookmarkData = prefs.getString('secure_bookmark');
+      if (bookmarkData == null) return;
+
+      final secureBookmarks = SecureBookmarks();
+      final resolvedUrl = await secureBookmarks.resolveBookmark(bookmarkData);
+      await secureBookmarks.stopAccessingSecurityScopedResource(resolvedUrl);
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ SyncService: Error stopping secure bookmark access: $e');
+      }
+    }
+  }
+
+  // Save to history method
+  Future<void> _saveToHistory(String entry) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      List<String> history = prefs.getStringList('job_history') ?? [];
+      history.insert(0, entry);
+      if (history.length > 50) {
+        history = history.take(50).toList();
+      }
+      await prefs.setStringList('job_history', history);
+    } catch (e) {
+      if (kDebugMode) {
+        print('⚠️ SyncService: Error saving to history: $e');
+      }
+    }
+  }
+
 }

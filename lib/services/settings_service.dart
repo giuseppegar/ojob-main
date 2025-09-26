@@ -26,7 +26,7 @@ class SettingsService {
     KeyboardService.instance.setAutoKeyboardEnabled(autoKeyboard);
 
     // Load app mode
-    final modeString = prefs.getString(_keyAppMode) ?? 'server';
+    final modeString = prefs.getString(_keyAppMode) ?? 'remote';
     final mode = modeString == 'remote' ? AppMode.remote : AppMode.server;
     appState.setMode(mode);
   }
@@ -51,7 +51,7 @@ class SettingsService {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keySupabaseUrl) ??
            dotenv.env['SUPABASE_URL'] ??
-           'http://192.168.1.225:8000';
+           'https://garofalohouse.ddns.net:8443';
   }
 
   Future<void> setSupabaseAnonKey(String key) async {
@@ -73,7 +73,7 @@ class SettingsService {
 
   Future<AppMode> getAppMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final modeString = prefs.getString(_keyAppMode) ?? 'server';
+    final modeString = prefs.getString(_keyAppMode) ?? 'remote';
     return modeString == 'remote' ? AppMode.remote : AppMode.server;
   }
 

@@ -21,6 +21,8 @@ import 'services/notification_service.dart';
 import 'services/keyboard_service.dart';
 import 'services/sync_service.dart';
 import 'services/settings_service.dart';
+import 'services/filter_service.dart';
+import 'widgets/filter_widget.dart';
 
 
 // Job Request class for remote communication
@@ -345,8 +347,8 @@ class DatabaseService {
     }
   }
 
-  // Get quality monitoring history
-  static Future<List<Map<String, dynamic>>> getQualityHistory() async {
+  // Get quality monitoring history with optional filtering
+  static Future<List<Map<String, dynamic>>> getQualityHistory({FilterService? filterService}) async {
     try {
       final supabase = _supabase;
       if (supabase == null) {
@@ -354,9 +356,24 @@ class DatabaseService {
         return [];
       }
 
-      final response = await supabase
+      var query = supabase
           .from('quality_monitoring')
-          .select('*, reject_details(*)')
+          .select('*, reject_details(*)');
+
+      // Applica filtri se forniti
+      if (filterService != null) {
+        final filterParams = filterService.getSupabaseFilter(timestampColumn: 'timestamp');
+        if (filterParams.isNotEmpty) {
+          if (filterParams.containsKey('timestamp_gte')) {
+            query = query.gte('timestamp', filterParams['timestamp_gte']);
+          }
+          if (filterParams.containsKey('timestamp_lte')) {
+            query = query.lte('timestamp', filterParams['timestamp_lte']);
+          }
+        }
+      }
+
+      final response = await query
           .order('timestamp', ascending: false)
           .limit(50);
 
@@ -364,6 +381,96 @@ class DatabaseService {
     } catch (e) {
       debugPrint('Error getting quality history: $e');
       return [];
+    }
+  }
+
+
+
+  // Get count of reject details (for statistics)
+  static Future<int> getRejectDetailsCount({FilterService? filterService}) async {
+    try {
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ DatabaseService: Supabase non inizializzato per getRejectDetailsCount');
+        return 0;
+      }
+
+      var query = supabase.from('reject_details').select('id');
+
+      // Applica filtri se forniti
+      if (filterService != null) {
+        final filterParams = filterService.getSupabaseFilter(timestampColumn: 'timestamp');
+        if (filterParams.isNotEmpty) {
+          // Per i reject_details dobbiamo filtrare tramite quality_monitoring
+          final qualityIds = await _getQualityMonitoringIdsInPeriod(filterService);
+          if (qualityIds.isNotEmpty) {
+            query = query.inFilter('quality_monitoring_id', qualityIds);
+          } else {
+            return 0; // Nessun quality_monitoring nel periodo = nessun reject_details
+          }
+        }
+      }
+
+      final response = await query;
+      return response.length;
+    } catch (e) {
+      debugPrint('❌ DatabaseService: Errore conteggio reject_details: $e');
+      return 0;
+    }
+  }
+
+  // Helper method to get quality_monitoring IDs in a specific period
+  static Future<List<String>> _getQualityMonitoringIdsInPeriod(FilterService filterService) async {
+    try {
+      final supabase = _supabase;
+      if (supabase == null) return [];
+
+      var query = supabase.from('quality_monitoring').select('id');
+
+      final filterParams = filterService.getSupabaseFilter(timestampColumn: 'timestamp');
+      if (filterParams.isNotEmpty) {
+        if (filterParams.containsKey('timestamp_gte')) {
+          query = query.gte('timestamp', filterParams['timestamp_gte']);
+        }
+        if (filterParams.containsKey('timestamp_lte')) {
+          query = query.lte('timestamp', filterParams['timestamp_lte']);
+        }
+      }
+
+      final response = await query;
+      return List<Map<String, dynamic>>.from(response)
+          .map((item) => item['id'] as String)
+          .toList();
+    } catch (e) {
+      debugPrint('❌ DatabaseService: Errore recupero quality_monitoring IDs: $e');
+      return [];
+    }
+  }
+
+  // Delete quality monitoring and related reject details for a period
+  static Future<bool> deleteQualityDataByPeriod({
+    required DateTime startDate,
+    required DateTime endDate,
+  }) async {
+    try {
+      final supabase = _supabase;
+      if (supabase == null) {
+        debugPrint('❌ DatabaseService: Supabase non inizializzato per deleteQualityDataByPeriod');
+        return false;
+      }
+
+      // Elimina i quality_monitoring (CASCADE eliminerà automaticamente i reject_details)
+      await supabase
+          .from('quality_monitoring')
+          .delete()
+          .gte('timestamp', startDate.toUtc().toIso8601String())
+          .lte('timestamp', endDate.toUtc().toIso8601String());
+
+      debugPrint('✅ DatabaseService: Quality data eliminati per il periodo ${startDate.toIso8601String()} - ${endDate.toIso8601String()}');
+      return true;
+    } catch (e) {
+      debugPrint('❌ DatabaseService: Errore eliminazione quality data per periodo: $e');
+      return false;
     }
   }
 }
@@ -1016,6 +1123,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     // Notification disabled
   }
 
+
   Future<void> _showAppModeSettings() async {
     final appState = Provider.of<AppState>(context, listen: false);
     bool tempAutoKeyboard = appState.isAutoKeyboardEnabled;
@@ -1375,9 +1483,6 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
   Timer? _jobFileMonitorTimer;
   final Set<String> _processedJobFiles = {}; // Track processed files to avoid duplicates
 
-  // Simple job request polling every 30 seconds
-  Timer? _jobRequestPollingTimer;
-  final Set<String> _processedJobRequestIds = {}; // Track processed requests to avoid duplicates
 
   // Helper methods for platform detection that work on web
   bool _isMacOS() {
@@ -1412,6 +1517,8 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
     super.initState();
     _loadHistory();
     _loadCurrentMode();
+    // Job request polling is now handled by SyncService globally
+    // Only start job file monitoring for local files
     _startJobFileMonitoring();
   }
 
@@ -1464,201 +1571,19 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
         _currentMode = appState.currentMode;
       });
 
-      // Start listening for job requests and file monitoring only in server mode
+      // Start/stop file monitoring based on mode
+      // Job request polling is now handled globally by SyncService
       if (_currentMode == AppMode.server) {
-        _startJobRequestListener();
         _startJobFileMonitoring();
       } else {
-        // Stop file monitoring and job request polling in remote mode
         _jobFileMonitorTimer?.cancel();
-        _jobRequestPollingTimer?.cancel();
       }
     }
   }
 
-  void _startJobRequestListener() {
-    _jobRequestSubscription?.cancel();
-    _jobRequestPollingTimer?.cancel();
 
-    if (_currentMode == AppMode.server) {
-      // Simple polling every 30 seconds to check for job requests
-      _startJobRequestPolling();
-      debugPrint('🔄 Avviato controllo job requests ogni 30 secondi');
-    }
-  }
 
-  void _startJobRequestPolling() {
-    _jobRequestPollingTimer?.cancel();
-    _jobRequestPollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
-      if (!mounted || _currentMode != AppMode.server) {
-        timer.cancel();
-        return;
-      }
 
-      try {
-        debugPrint('🔄 Controllo job requests nel database...');
-        final requests = await AppModeService.getPendingRequests();
-
-        if (mounted && requests.isNotEmpty) {
-          debugPrint('📨 Trovate ${requests.length} richieste job pending');
-
-          setState(() {
-            // Requests loaded but not stored locally
-          });
-
-          // Process only new requests we haven't processed before
-          for (final request in requests) {
-            if (request.status == 'pending' && !_processedJobRequestIds.contains(request.id)) {
-              debugPrint('🔄 Elaborazione nuova richiesta job: ${request.id}');
-              _processedJobRequestIds.add(request.id);
-              await _processJobRequest(request);
-            }
-          }
-        } else {
-          debugPrint('ℹ️ Nessuna richiesta job pending trovata');
-        }
-      } catch (e) {
-        debugPrint('❌ Errore controllo job requests: $e');
-      }
-    });
-
-    // Do an immediate check when starting
-    Future.delayed(const Duration(seconds: 2), () async {
-      if (mounted && _currentMode == AppMode.server) {
-        try {
-          debugPrint('🔄 Controllo iniziale job requests...');
-          final requests = await AppModeService.getPendingRequests();
-          if (mounted && requests.isNotEmpty) {
-            debugPrint('📨 Controllo iniziale: trovate ${requests.length} richieste');
-            setState(() {
-              // Requests loaded but not stored locally
-            });
-            for (final request in requests) {
-              if (request.status == 'pending' && !_processedJobRequestIds.contains(request.id)) {
-                _processedJobRequestIds.add(request.id);
-                await _processJobRequest(request);
-              }
-            }
-          }
-        } catch (e) {
-          debugPrint('❌ Errore controllo iniziale: $e');
-        }
-      }
-    });
-  }
-
-  Future<void> _processJobRequest(JobRequest request) async {
-    try {
-      debugPrint('🔄 Processing job request: ${request.id}');
-
-      // Mark as processing
-      await AppModeService.markRequestProcessing(request.id);
-
-      // Generate the job file automatically
-      final success = await _generateJobFileFromRequest(
-        request.articleCode,
-        request.lot,
-        request.pieces,
-      );
-
-      if (success) {
-        // Mark as completed
-        await AppModeService.markRequestCompleted(request.id);
-        debugPrint('✅ Job request completed: ${request.id}');
-
-        // Notification disabled
-      } else {
-        // Mark as failed
-        await AppModeService.markRequestFailed(request.id, 'Errore generazione file');
-        debugPrint('❌ Job request failed: ${request.id}');
-      }
-    } catch (e) {
-      debugPrint('❌ Error processing job request: $e');
-      await AppModeService.markRequestFailed(request.id, e.toString());
-    }
-  }
-
-  Future<bool> _generateJobFileFromRequest(String articleCode, String lot, int pieces) async {
-    bool isAccessingSecureResource = false;
-
-    try {
-      // Prepare content
-      final String content = '$articleCode\t$lot\t$pieces';
-
-      // Validate TAB format
-      final tabCount = '\t'.allMatches(content).length;
-      if (tabCount != 2) {
-        debugPrint('❌ Invalid format: TAB count ($tabCount/2)');
-        return false;
-      }
-
-      final String fileName = 'Job_Schedule.txt';
-      String finalPath;
-
-      // Use saved path if available, otherwise use current directory
-      if (_selectedPath.isNotEmpty) {
-        finalPath = '$_selectedPath/$fileName';
-
-        // Su macOS, gestisci i secure bookmarks per i permessi di scrittura
-        if (_isMacOS() && _secureBookmarkData != null) {
-          try {
-            final secureBookmarks = SecureBookmarks();
-            final resolvedUrl = await secureBookmarks.resolveBookmark(_secureBookmarkData!);
-
-            // Avvia l'accesso sicuro alla risorsa
-            isAccessingSecureResource = await secureBookmarks.startAccessingSecurityScopedResource(resolvedUrl);
-
-            if (!isAccessingSecureResource) {
-              debugPrint('❌ Failed to start accessing secure resource');
-              return false;
-            }
-
-            debugPrint('✅ Secure bookmark access started for automatic file generation');
-          } catch (e) {
-            debugPrint('❌ Error with secure bookmark: $e');
-            return false;
-          }
-        }
-      } else {
-        final directory = await getApplicationDocumentsDirectory();
-        finalPath = '${directory.path}/$fileName';
-      }
-
-      // Write file
-      final file = File(finalPath);
-      await file.writeAsString(content, flush: true);
-
-      // Save to history
-      final String historyEntry = '$articleCode - $lot - $pieces';
-      await _saveToHistory(historyEntry);
-
-      // Save to database
-      await DatabaseService.saveJob(
-        articleCode: articleCode,
-        lot: lot,
-        pieces: pieces,
-        filePath: finalPath,
-      );
-
-      debugPrint('✅ Job file generated successfully: $finalPath');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Error generating job file: $e');
-      return false;
-    } finally {
-      // Su macOS, ferma l'accesso alla risorsa sicura se era stata avviata
-      if (_isMacOS() && isAccessingSecureResource && _secureBookmarkData != null) {
-        try {
-          final secureBookmarks = SecureBookmarks();
-          final resolvedUrl = await secureBookmarks.resolveBookmark(_secureBookmarkData!);
-          await secureBookmarks.stopAccessingSecurityScopedResource(resolvedUrl);
-          debugPrint('✅ Stopped secure bookmark access');
-        } catch (e) {
-          debugPrint('⚠️ Error stopping secure bookmark access: $e');
-        }
-      }
-    }
-  }
 
   Future<void> _saveToHistory(String entry) async {
     final prefs = await SharedPreferences.getInstance();
@@ -3416,7 +3341,6 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
   void dispose() {
     _jobRequestSubscription?.cancel();
     _jobFileMonitorTimer?.cancel();
-    _jobRequestPollingTimer?.cancel();
     _codiceArticoloController.dispose();
     _lottoController.dispose();
     _numeroPezziController.dispose();
@@ -4292,109 +4216,11 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
               ),
             ),
 
-            if (_currentData!.rejects.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              FadeInUp(
-                delay: const Duration(milliseconds: 300),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.grey.shade200),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.shade100,
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              PhosphorIcons.warning(),
-                              color: Colors.red.shade600,
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Motivi Scarto',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _currentData!.rejects.length,
-                        separatorBuilder: (context, index) => const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final reject = _currentData!.rejects[index];
-                          return Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.red.shade200),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade600,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      reject.count.toString(),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    reject.reason,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.red.shade800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-
-            // Sezione Ultimi 10 Scarti
+            // Sezione Ultimi 10 Scarti (ora mostrata per prima)
             if (_currentData!.latestRejects.isNotEmpty) ...[
               const SizedBox(height: 24),
               FadeInUp(
-                delay: const Duration(milliseconds: 350),
+                delay: const Duration(milliseconds: 300),
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -4501,6 +4327,105 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
                                     ),
                                   ),
                                 ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
+            // Sezione Motivi Scarto (ora mostrata per seconda)
+            if (_currentData!.rejects.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              FadeInUp(
+                delay: const Duration(milliseconds: 350),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.grey.shade200),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.shade100,
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              PhosphorIcons.warning(),
+                              color: Colors.red.shade600,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Motivi Scarto',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      ListView.separated(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _currentData!.rejects.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final reject = _currentData!.rejects[index];
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 24,
+                                  height: 24,
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade600,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      reject.count.toString(),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    reject.reason,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.red.shade800,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           );
@@ -4983,12 +4908,19 @@ class RemoteQualityDashboard extends StatefulWidget {
 
 class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
   List<Map<String, dynamic>> _qualityData = [];
+  List<Map<String, dynamic>> _allQualityData = []; // Store all data for reject reasons
   bool _isLoading = true;
   Timer? _refreshTimer;
+  final FilterService _filterService = FilterService();
 
   @override
   void initState() {
     super.initState();
+    _initializeFilters();
+  }
+
+  Future<void> _initializeFilters() async {
+    await _filterService.initialize();
     _loadQualityData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _loadQualityData();
@@ -4997,11 +4929,13 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
 
   Future<void> _loadQualityData() async {
     try {
-      final data = await DatabaseService.getQualityHistory();
+      final data = await DatabaseService.getQualityHistory(filterService: _filterService);
       if (mounted) {
         setState(() {
-          // Show only the latest record
+          // Show only the latest record for main display
           _qualityData = data.isNotEmpty ? [data.first] : [];
+          // Store all data for comprehensive reject reasons
+          _allQualityData = data;
           _isLoading = false;
         });
       }
@@ -5028,6 +4962,16 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
+                    // Filter Widget
+                    FilterWidget(
+                      onFilterChanged: () {
+                        setState(() {
+                          _isLoading = true;
+                        });
+                        _loadQualityData();
+                      },
+                    ),
+                    const SizedBox(height: 16),
                     FadeInUp(
                       duration: const Duration(milliseconds: 600),
                       child: Container(
@@ -5140,6 +5084,155 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
                                       Expanded(child: _buildStatCard('Scarti', '${data['rejected_pieces'] ?? 0}', Colors.red)),
                                     ],
                                   ),
+
+                                  // Show last 10 rejects if available
+                                  if (data['reject_details'] != null && (data['reject_details'] as List).isNotEmpty) ...[
+                                    const SizedBox(height: 16),
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: Colors.blue.shade200),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(6),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue.shade600,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: Icon(PhosphorIcons.clock(), color: Colors.white, size: 16),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                'Ultimi 10 Scarti',
+                                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue.shade800),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ListView.separated(
+                                            shrinkWrap: true,
+                                            physics: const NeverScrollableScrollPhysics(),
+                                            itemCount: (data['reject_details'] as List).take(10).length,
+                                            separatorBuilder: (context, index) => const SizedBox(height: 6),
+                                            itemBuilder: (context, index) {
+                                              final reject = (data['reject_details'] as List)[index];
+                                              return Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: Colors.blue.shade200),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Text(
+                                                          'Pezzo ${reject['progressivo'] ?? 'N/A'}',
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.blue.shade800,
+                                                          ),
+                                                        ),
+                                                        const Spacer(),
+                                                        if (reject['timestamp'] != null) ...[
+                                                          Text(
+                                                            _formatTimestamp(reject['timestamp']),
+                                                            style: TextStyle(
+                                                              fontSize: 10,
+                                                              color: Colors.grey.shade600,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ],
+                                                    ),
+                                                    if (reject['station'] != null) ...[
+                                                      const SizedBox(height: 2),
+                                                      Text(
+                                                        'Stazione: ${reject['station']}',
+                                                        style: TextStyle(
+                                                          fontSize: 10,
+                                                          color: Colors.grey.shade600,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                    if (reject['code'] != null && reject['code'] != 'N/A') ...[
+                                                      const SizedBox(height: 2),
+                                                      Text(
+                                                        'Codice: ${reject['code']}',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: Colors.red.shade700,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                    if (reject['description'] != null && reject['description'] != 'N/A') ...[
+                                                      const SizedBox(height: 2),
+                                                      Text(
+                                                        reject['description'],
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey.shade700,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+
+                                  // Show reject reasons summary from ALL quality data
+                                  if (_allQualityData.isNotEmpty && _getAllRejectDetails().isNotEmpty) ...[
+                                    const SizedBox(height: 16),
+                                    Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: Colors.red.shade200),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(6),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.red.shade600,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: Icon(PhosphorIcons.warning(), color: Colors.white, size: 16),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                'Motivi Scarto (Tutti)',
+                                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.red.shade800),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ..._buildRejectReasonsSummary(_getAllRejectDetails()),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -5168,6 +5261,100 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
         ],
       ),
     );
+  }
+
+  String _formatTimestamp(String? timestamp) {
+    if (timestamp == null) return 'N/A';
+    try {
+      final dateTime = DateTime.parse(timestamp);
+      return '${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+
+  List<dynamic> _getAllRejectDetails() {
+    List<dynamic> allRejects = [];
+    for (final record in _allQualityData) {
+      if (record['reject_details'] != null) {
+        allRejects.addAll(record['reject_details'] as List);
+      }
+    }
+    return allRejects;
+  }
+
+  List<Widget> _buildRejectReasonsSummary(List<dynamic> rejectDetails) {
+    // Group rejects by reason (code + description)
+    final Map<String, int> rejectCounts = {};
+
+    for (final reject in rejectDetails) {
+      String reason = '';
+
+      if (reject['station'] != null) {
+        reason += reject['station'];
+      }
+
+      if (reject['code'] != null && reject['code'] != 'N/A') {
+        if (reason.isNotEmpty) reason += ' - ';
+        reason += 'Codice: ${reject['code']}';
+      }
+
+      if (reject['description'] != null && reject['description'] != 'N/A') {
+        if (reason.isNotEmpty) reason += ' - ';
+        reason += reject['description'];
+      }
+
+      if (reason.isEmpty) reason = 'Scarto sconosciuto';
+
+      rejectCounts[reason] = (rejectCounts[reason] ?? 0) + 1;
+    }
+
+    // Sort by count (highest first)
+    final sortedEntries = rejectCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return sortedEntries.map((entry) => Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: Colors.red.shade600,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                entry.value.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              entry.key,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.red.shade800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    )).toList();
   }
 
   @override
