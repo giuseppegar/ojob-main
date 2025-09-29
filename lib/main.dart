@@ -558,7 +558,7 @@ class AppModeService {
           .select()
           .eq('status', 'pending')
           .order('requested_at', ascending: true)
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
 
       debugPrint('✅ AppModeService: Query completata, ${response.length} risultati');
 
@@ -719,7 +719,7 @@ void main() async {
       await Supabase.initialize(
         url: supabaseUrl,
         anonKey: supabaseKey,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       debugPrint('✅ Supabase inizializzato: $supabaseUrl');
     } else {
       debugPrint('⚠️ Configurazione Supabase mancante');
@@ -3364,6 +3364,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
   String? _currentFileName;
   bool _isLoading = false;
   DateTime? _lastFileModified;
+  final FilterService _filterService = FilterService();
 
   // Manual counter variables (using global state now)
   int _manualGoodPieces = 0;
@@ -3376,8 +3377,13 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
   @override
   void initState() {
     super.initState();
+    _initializeFilters();
     _loadMonitoringPath();
     _loadCounterState();
+  }
+
+  Future<void> _initializeFilters() async {
+    await _filterService.initialize();
   }
 
   @override
@@ -3563,8 +3569,12 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
     }
   }
 
-  Future<void> _loadLatestCSVData() async {
-    if (_isLoading) return;
+  Future<void> _loadLatestCSVData({bool forceReload = false}) async {
+    debugPrint('📊 QualityMonitoring: _loadLatestCSVData chiamato');
+    if (_isLoading) {
+      debugPrint('⚠️ QualityMonitoring: _loadLatestCSVData saltato - già in caricamento');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -3636,10 +3646,11 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
       }
 
 
-      // Aggiorna i dati solo se il file è cambiato
-      if (fileChanged) {
+      // Aggiorna i dati se il file è cambiato o se è forzato il reload
+      if (fileChanged || forceReload) {
+        debugPrint('🔄 QualityMonitoring: Ricaricamento dati - fileChanged: $fileChanged, forceReload: $forceReload');
         final content = await _readFileWithFallbackEncoding(latestFile);
-        final data = _parseCSVData(content);
+        final data = _parseCSVData(content, filterService: _filterService);
 
         setState(() {
           _currentData = data;
@@ -3669,7 +3680,7 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
     }
   }
 
-  QualityData _parseCSVData(String csvContent) {
+  QualityData _parseCSVData(String csvContent, {FilterService? filterService}) {
     final List<List<dynamic>> rows = const CsvToListConverter(fieldDelimiter: ';').convert(csvContent);
 
     if (rows.isEmpty) {
@@ -3720,6 +3731,39 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
         // Controlla l'esito e la stazione
         final esito = esitoIndex != null ? row[esitoIndex].toString().trim() : '';
         final stazione = stazioneIndex != null ? row[stazioneIndex].toString().trim() : '';
+
+        // Parse the timestamp for filtering
+        DateTime? rowTimestamp;
+        if (dataOraIndex != null && filterService != null) {
+          final dataOra = row[dataOraIndex].toString().trim();
+          if (dataOra.isNotEmpty) {
+            try {
+              // Cerca di parsare la data nel formato DD/MM/YYYY HH:mm:ss
+              final parts = dataOra.split(' ');
+              if (parts.length >= 2) {
+                final dateParts = parts[0].split('/');
+                final timeParts = parts[1].split(':');
+                if (dateParts.length == 3 && timeParts.length >= 2) {
+                  rowTimestamp = DateTime(
+                    int.parse(dateParts[2]), // year
+                    int.parse(dateParts[1]), // month
+                    int.parse(dateParts[0]), // day
+                    int.parse(timeParts[0]), // hour
+                    int.parse(timeParts[1]), // minute
+                    timeParts.length > 2 ? int.parse(timeParts[2]) : 0, // second
+                  );
+                }
+              }
+            } catch (e) {
+              // Se il parsing fallisce, ignora il filtro per questa riga
+            }
+          }
+
+          // Skip row if it doesn't match the current filter
+          if (rowTimestamp != null && !filterService.isDateInCurrentFilter(rowTimestamp)) {
+            continue;
+          }
+        }
 
         // Debug per le prime 3 righe
 
@@ -4074,6 +4118,19 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
                 ],
               ),
             ),
+          ),
+
+          // Filter Widget
+          const SizedBox(height: 16),
+          FilterWidget(
+            filterService: _filterService,
+            onFilterChanged: () {
+              debugPrint('🔄 FilterWidget: Applicazione nuovo filtro - ricaricamento dati...');
+              setState(() {
+                // Trigger reload of CSV data with new filter (force reload)
+                _loadLatestCSVData(forceReload: true);
+              });
+            },
           ),
 
           if (_currentData != null) ...[
@@ -4911,16 +4968,10 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
   List<Map<String, dynamic>> _allQualityData = []; // Store all data for reject reasons
   bool _isLoading = true;
   Timer? _refreshTimer;
-  final FilterService _filterService = FilterService();
 
   @override
   void initState() {
     super.initState();
-    _initializeFilters();
-  }
-
-  Future<void> _initializeFilters() async {
-    await _filterService.initialize();
     _loadQualityData();
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _loadQualityData();
@@ -4929,7 +4980,7 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
 
   Future<void> _loadQualityData() async {
     try {
-      final data = await DatabaseService.getQualityHistory(filterService: _filterService);
+      final data = await DatabaseService.getQualityHistory();
       if (mounted) {
         setState(() {
           // Show only the latest record for main display
@@ -4962,16 +5013,6 @@ class _RemoteQualityDashboardState extends State<RemoteQualityDashboard> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
                   children: [
-                    // Filter Widget
-                    FilterWidget(
-                      onFilterChanged: () {
-                        setState(() {
-                          _isLoading = true;
-                        });
-                        _loadQualityData();
-                      },
-                    ),
-                    const SizedBox(height: 16),
                     FadeInUp(
                       duration: const Duration(milliseconds: 600),
                       child: Container(

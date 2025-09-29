@@ -4,10 +4,12 @@ import '../services/filter_service.dart';
 
 class FilterWidget extends StatefulWidget {
   final VoidCallback? onFilterChanged;
+  final FilterService? filterService;
 
   const FilterWidget({
     super.key,
     this.onFilterChanged,
+    this.filterService,
   });
 
   @override
@@ -15,9 +17,15 @@ class FilterWidget extends StatefulWidget {
 }
 
 class _FilterWidgetState extends State<FilterWidget> {
-  final FilterService _filterService = FilterService();
+  late final FilterService _filterService;
   DateTime? _customStartDate;
   DateTime? _customEndDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _filterService = widget.filterService ?? FilterService();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -198,17 +206,79 @@ class _FilterWidgetState extends State<FilterWidget> {
                               size: 16,
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              'Configura Periodo Personalizzato',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Configura Periodo Personalizzato',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Aggiornamento automatico alla selezione',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
+
+                        // Status indicator per date personalizzate
+                        if (_customStartDate != null || _customEndDate != null) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: (_customStartDate != null && _customEndDate != null)
+                                  ? Colors.green.withValues(alpha: 0.2)
+                                  : Colors.orange.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: (_customStartDate != null && _customEndDate != null)
+                                    ? Colors.green
+                                    : Colors.orange,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  (_customStartDate != null && _customEndDate != null)
+                                      ? PhosphorIconsRegular.checkCircle
+                                      : PhosphorIconsRegular.clock,
+                                  size: 14,
+                                  color: (_customStartDate != null && _customEndDate != null)
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  (_customStartDate != null && _customEndDate != null)
+                                      ? 'Periodo configurato - Dati aggiornati automaticamente'
+                                      : 'Seleziona entrambe le date per aggiornamento automatico',
+                                  style: TextStyle(
+                                    color: (_customStartDate != null && _customEndDate != null)
+                                        ? Colors.green
+                                        : Colors.orange,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
 
                         // Data inizio
                         Row(
@@ -247,53 +317,22 @@ class _FilterWidgetState extends State<FilterWidget> {
 
                 const SizedBox(height: 16),
 
-                // Bottoni azione
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton.icon(
-                        onPressed: _resetFilter,
-                        icon: Icon(
-                          PhosphorIconsRegular.arrowClockwise,
-                          size: 18,
-                          color: Colors.white.withValues(alpha: 0.8),
-                        ),
-                        label: Text(
-                          'Reset',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.8),
-                          ),
-                        ),
+                // Bottone Reset
+                Center(
+                  child: TextButton.icon(
+                    onPressed: _resetFilter,
+                    icon: Icon(
+                      PhosphorIconsRegular.arrowClockwise,
+                      size: 18,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
+                    label: Text(
+                      'Reset Filtro',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.8),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: widget.onFilterChanged,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF6366F1),
-                          elevation: 4,
-                          shadowColor: Colors.black.withValues(alpha: 0.3),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                        ),
-                        icon: Icon(
-                          PhosphorIconsRegular.check,
-                          size: 18,
-                        ),
-                        label: const Text(
-                          'Applica',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),
@@ -389,12 +428,18 @@ class _FilterWidgetState extends State<FilterWidget> {
   }
 
   Future<void> _onFilterOptionSelected(int index) async {
+    debugPrint('🎯 FilterWidget: _onFilterOptionSelected chiamato per index $index');
     final period = _filterService.getFilterPeriodFromIndex(index);
     await _filterService.setFilterPeriod(period);
     setState(() {});
 
     if (widget.onFilterChanged != null) {
-      widget.onFilterChanged!();
+      debugPrint('🔔 FilterWidget: chiamando onFilterChanged callback');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onFilterChanged!();
+      });
+    } else {
+      debugPrint('⚠️ FilterWidget: onFilterChanged callback è null');
     }
   }
 
@@ -410,8 +455,11 @@ class _FilterWidgetState extends State<FilterWidget> {
       await _filterService.setCustomRange(_customStartDate!, _customEndDate!);
       setState(() {});
 
+      // Chiamata asincrona per permettere al widget di aggiornarsi
       if (widget.onFilterChanged != null) {
-        widget.onFilterChanged!();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          widget.onFilterChanged!();
+        });
       }
     }
   }
@@ -424,7 +472,9 @@ class _FilterWidgetState extends State<FilterWidget> {
     });
 
     if (widget.onFilterChanged != null) {
-      widget.onFilterChanged!();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onFilterChanged!();
+      });
     }
   }
 

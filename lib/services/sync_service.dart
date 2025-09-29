@@ -140,6 +140,20 @@ class SyncService {
 
       if (kDebugMode) {
         print('🔍 SyncService: Esecuzione query job_requests...');
+        print('🌐 SyncService: Connessione al database in corso...');
+      }
+
+      // Test di connettività di base
+      try {
+        await supabase.from('job_requests').select('count').limit(1).timeout(const Duration(seconds: 10));
+        if (kDebugMode) {
+          print('✅ SyncService: Test di connettività riuscito');
+        }
+      } catch (testError) {
+        if (kDebugMode) {
+          print('❌ SyncService: Test di connettività fallito: $testError');
+        }
+        rethrow;
       }
 
       final response = await supabase
@@ -147,7 +161,7 @@ class SyncService {
           .select()
           .eq('status', 'pending')
           .order('requested_at', ascending: true)
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
 
       if (kDebugMode) {
         print('✅ SyncService: Query completata, ${response.length} risultati');
@@ -157,8 +171,14 @@ class SyncService {
     } catch (e) {
       if (kDebugMode) {
         print('❌ SyncService: Errore recupero richieste: $e');
-        if (e.toString().contains('timeout')) {
-          print('⚠️ SyncService: Timeout connessione database - controllare configurazione');
+        if (e.toString().contains('timeout') || e.toString().contains('TimeoutException')) {
+          print('⚠️ SyncService: Timeout connessione database (30s)');
+          print('🔧 SyncService: Controllare che il database sia raggiungibile all\'indirizzo configurato');
+          print('🌐 SyncService: Verificare configurazione URL in .env');
+        } else if (e.toString().contains('connection')) {
+          print('🔧 SyncService: Problema di connessione di rete - verificare connettività');
+        } else {
+          print('🔧 SyncService: Errore generico - verificare configurazione database');
         }
       }
       return [];
