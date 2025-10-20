@@ -25,9 +25,21 @@ class SettingsService {
     appState.setAutoKeyboard(autoKeyboard);
     KeyboardService.instance.setAutoKeyboardEnabled(autoKeyboard);
 
-    // Load app mode
+    // Load app mode (now supports server, remote, and standalone)
     final modeString = prefs.getString(_keyAppMode) ?? 'remote';
-    final mode = modeString == 'remote' ? AppMode.remote : AppMode.server;
+    AppMode mode;
+    switch (modeString) {
+      case 'server':
+        mode = AppMode.server;
+        break;
+      case 'standalone':
+        mode = AppMode.standalone;
+        break;
+      case 'remote':
+      default:
+        mode = AppMode.remote;
+        break;
+    }
     appState.setMode(mode);
   }
 
@@ -68,13 +80,24 @@ class SettingsService {
 
   Future<void> setAppMode(AppMode mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyAppMode, mode == AppMode.remote ? 'remote' : 'server');
+    // Save mode name directly (server, remote, or standalone)
+    await prefs.setString(_keyAppMode, mode.name);
   }
 
   Future<AppMode> getAppMode() async {
     final prefs = await SharedPreferences.getInstance();
     final modeString = prefs.getString(_keyAppMode) ?? 'remote';
-    return modeString == 'remote' ? AppMode.remote : AppMode.server;
+
+    // Parse mode from saved string
+    switch (modeString) {
+      case 'server':
+        return AppMode.server;
+      case 'standalone':
+        return AppMode.standalone;
+      case 'remote':
+      default:
+        return AppMode.remote;
+    }
   }
 
   // Force reset to local database configuration

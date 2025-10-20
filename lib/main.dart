@@ -1044,6 +1044,78 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     }
   }
 
+  Future<void> _selectJobFilePath() async {
+    try {
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Seleziona cartella di destinazione per i file di lavoro',
+      );
+
+      if (selectedDirectory != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('saved_path', selectedDirectory);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Percorso impostato: $selectedDirectory'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          // Reopen settings dialog to show updated path
+          Navigator.of(context).pop();
+          await _showAppModeSettings();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Errore selezione percorso: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _selectCSVPath() async {
+    try {
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Seleziona cartella CSV di monitoraggio qualità',
+      );
+
+      if (selectedDirectory != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('monitoring_path', selectedDirectory);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Percorso CSV impostato: $selectedDirectory'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+          // Reopen settings dialog to show updated path
+          Navigator.of(context).pop();
+          await _showAppModeSettings();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Errore selezione percorso CSV: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _testDatabaseConnection() async {
     try {
       final supabase = _supabase;
@@ -1162,99 +1234,6 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.warning_amber, size: 16, color: Colors.red),
-                        SizedBox(width: 8),
-                        Text('Reset Completo:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Se l\'app non funziona correttamente, usa il pulsante qui sotto per cancellare TUTTI i dati e ricominciare da zero.',
-                      style: TextStyle(fontSize: 12, color: Colors.red),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          final confirmed = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Conferma Reset Completo'),
-                              content: const Text(
-                                'Questa operazione cancellerà TUTTI i dati dell\'app:\n\n'
-                                '• Configurazione database\n'
-                                '• Cronologia job\n'
-                                '• Dati qualità locali\n'
-                                '• Tutte le impostazioni\n\n'
-                                'L\'app si riavvierà automaticamente.\n\n'
-                                'Sei sicuro?'
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.of(context).pop(false),
-                                  child: const Text('Annulla'),
-                                ),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.of(context).pop(true),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Text('Cancella Tutto'),
-                                ),
-                              ],
-                            ),
-                          );
-
-                          if (confirmed == true && context.mounted) {
-                            // Reset completo
-                            await SettingsService.instance.resetAllData();
-
-                            if (context.mounted) {
-                              // Chiudi il dialog
-                              Navigator.of(context).pop(false);
-
-                              // Mostra messaggio e chiudi l'app
-                              showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (context) => const AlertDialog(
-                                  title: Text('Reset Completato'),
-                                  content: Text(
-                                    'Tutti i dati sono stati cancellati.\n\n'
-                                    'Riavvia manualmente l\'app per ricominciare.'
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                        icon: const Icon(Icons.delete_forever, size: 16),
-                        label: const Text('Reset Completo App', style: TextStyle(fontSize: 12)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -1368,6 +1347,80 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   ),
                 )),
                 const SizedBox(height: 16),
+                // Standalone mode configuration
+                if (tempSelectedMode == AppMode.standalone) ...[
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Configurazione Standalone:',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  FutureBuilder<String?>(
+                    future: SharedPreferences.getInstance().then((prefs) => prefs.getString('saved_path')),
+                    builder: (context, snapshot) {
+                      final savedPath = snapshot.data ?? '';
+                      return Card(
+                        child: ListTile(
+                          title: const Text('Percorso file di lavoro'),
+                          subtitle: Text(
+                            savedPath.isEmpty ? 'Nessun percorso selezionato' : savedPath,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          leading: Icon(PhosphorIcons.folder(), color: Theme.of(context).colorScheme.primary),
+                          trailing: Icon(PhosphorIcons.caretRight()),
+                          onTap: () async {
+                            await _selectJobFilePath();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  // CSV Monitoring Path
+                  FutureBuilder<String?>(
+                    future: SharedPreferences.getInstance().then((prefs) => prefs.getString('monitoring_path')),
+                    builder: (context, snapshot) {
+                      final monitoringPath = snapshot.data ?? '';
+                      return Card(
+                        child: ListTile(
+                          title: const Text('Percorso CSV qualità'),
+                          subtitle: Text(
+                            monitoringPath.isEmpty ? 'Nessun percorso selezionato' : monitoringPath,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          leading: Icon(PhosphorIcons.fileCsv(), color: Theme.of(context).colorScheme.primary),
+                          trailing: Icon(PhosphorIcons.caretRight()),
+                          onTap: () async {
+                            await _selectCSVPath();
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(PhosphorIcons.info(), size: 14, color: Colors.purple.shade600),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'In modalità standalone:\n• I file di lavoro vengono salvati nel percorso Job Schedule\n• I dati CSV qualità vengono monitorati e salvati localmente',
+                            style: TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 16),
                 const Text(
@@ -1421,6 +1474,109 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                 ],
               ),
             ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                // Reset Completo Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(PhosphorIcons.warning(), size: 16, color: Colors.red.shade600),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Reset Completo App',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Se l\'app non funziona correttamente, puoi cancellare TUTTI i dati e ricominciare da zero.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Conferma Reset Completo'),
+                                content: const Text(
+                                  'Questa operazione cancellerà TUTTI i dati dell\'app:\n\n'
+                                  '• Configurazione database\n'
+                                  '• Cronologia job\n'
+                                  '• Dati qualità locali\n'
+                                  '• Tutte le impostazioni\n'
+                                  '• Percorsi salvati\n\n'
+                                  'Sei sicuro?'
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(false),
+                                    child: const Text('Annulla'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () => Navigator.of(context).pop(true),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('Cancella Tutto'),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirmed == true && context.mounted) {
+                              // Reset completo
+                              await SettingsService.instance.resetAllData();
+
+                              if (context.mounted) {
+                                // Chiudi tutti i dialog
+                                Navigator.of(context).pop();
+
+                                // Mostra messaggio di conferma
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (context) => const AlertDialog(
+                                    title: Text('Reset Completato'),
+                                    content: Text(
+                                      'Tutti i dati sono stati cancellati.\n\n'
+                                      'Riavvia manualmente l\'app per ricominciare.'
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.delete_forever, size: 16),
+                          label: const Text('Cancella Tutti i Dati', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -1444,17 +1600,17 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     );
 
     if (result != null) {
-      final selectedMode = result['selectedMode'] as AppMode;
-      final autoKeyboard = result['autoKeyboard'] as bool;
+      final selectedMode = result['selectedMode'] as AppMode?;
+      final autoKeyboard = result['autoKeyboard'] as bool?;
 
       // Save auto keyboard setting
-      if (autoKeyboard != appState.isAutoKeyboardEnabled) {
+      if (autoKeyboard != null && autoKeyboard != appState.isAutoKeyboardEnabled) {
         await SettingsService.instance.setAutoKeyboardEnabled(autoKeyboard);
         appState.setAutoKeyboard(autoKeyboard);
       }
 
       // Save mode setting
-      if (selectedMode != _currentMode) {
+      if (selectedMode != null && selectedMode != _currentMode) {
         await SettingsService.instance.setAppMode(selectedMode);
         appState.setMode(selectedMode);
 
@@ -1517,37 +1673,49 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
             icon: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Badge combinato più compatto
+                // Badge combinato più compatto (supporta server, remote, standalone)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: _currentMode == AppMode.server
                         ? Colors.blue.withValues(alpha: 0.1)
-                        : Colors.orange.withValues(alpha: 0.1),
+                        : _currentMode == AppMode.standalone
+                            ? Colors.purple.withValues(alpha: 0.1)
+                            : Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: _currentMode == AppMode.server
                           ? Colors.blue.withValues(alpha: 0.3)
-                          : Colors.orange.withValues(alpha: 0.3),
+                          : _currentMode == AppMode.standalone
+                              ? Colors.purple.withValues(alpha: 0.3)
+                              : Colors.orange.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        PhosphorIcons.cloudCheck(),
+                        _currentMode == AppMode.standalone
+                            ? PhosphorIcons.laptop()
+                            : PhosphorIcons.cloudCheck(),
                         size: 12,
-                        color: Colors.green.shade600,
+                        color: _currentMode == AppMode.standalone
+                            ? Colors.purple.shade600
+                            : Colors.green.shade600,
                       ),
                       const SizedBox(width: 2),
                       Icon(
                         _currentMode == AppMode.server
                             ? PhosphorIcons.desktop()
-                            : PhosphorIcons.deviceMobile(),
+                            : _currentMode == AppMode.standalone
+                                ? PhosphorIcons.database()
+                                : PhosphorIcons.deviceMobile(),
                         size: 12,
                         color: _currentMode == AppMode.server
                             ? Colors.blue.shade600
-                            : Colors.orange.shade600,
+                            : _currentMode == AppMode.standalone
+                                ? Colors.purple.shade600
+                                : Colors.orange.shade600,
                       ),
                       const SizedBox(width: 2),
                       Text(
@@ -1557,7 +1725,9 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                           fontWeight: FontWeight.w600,
                           color: _currentMode == AppMode.server
                               ? Colors.blue.shade600
-                              : Colors.orange.shade600,
+                              : _currentMode == AppMode.standalone
+                                  ? Colors.purple.shade600
+                                  : Colors.orange.shade600,
                         ),
                       ),
                     ],
