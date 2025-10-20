@@ -1096,7 +1096,8 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
 
     await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
         title: Row(
           children: [
             Icon(PhosphorIcons.wrench(), color: Theme.of(context).colorScheme.primary),
@@ -1161,6 +1162,99 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.warning_amber, size: 16, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Reset Completo:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Se l\'app non funziona correttamente, usa il pulsante qui sotto per cancellare TUTTI i dati e ricominciare da zero.',
+                      style: TextStyle(fontSize: 12, color: Colors.red),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Conferma Reset Completo'),
+                              content: const Text(
+                                'Questa operazione cancellerà TUTTI i dati dell\'app:\n\n'
+                                '• Configurazione database\n'
+                                '• Cronologia job\n'
+                                '• Dati qualità locali\n'
+                                '• Tutte le impostazioni\n\n'
+                                'L\'app si riavvierà automaticamente.\n\n'
+                                'Sei sicuro?'
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(false),
+                                  child: const Text('Annulla'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.of(context).pop(true),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Cancella Tutto'),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (confirmed == true && context.mounted) {
+                            // Reset completo
+                            await SettingsService.instance.resetAllData();
+
+                            if (context.mounted) {
+                              // Chiudi il dialog
+                              Navigator.of(context).pop(false);
+
+                              // Mostra messaggio e chiudi l'app
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (context) => const AlertDialog(
+                                  title: Text('Reset Completato'),
+                                  content: Text(
+                                    'Tutti i dati sono stati cancellati.\n\n'
+                                    'Riavvia manualmente l\'app per ricominciare.'
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.delete_forever, size: 16),
+                        label: const Text('Reset Completo App', style: TextStyle(fontSize: 12)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -1172,8 +1266,10 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
               final localUrl = await SettingsService.instance.getSupabaseUrl();
               final localKey = await SettingsService.instance.getSupabaseAnonKey();
 
-              urlController.text = localUrl;
-              keyController.text = localKey;
+              setDialogState(() {
+                urlController.text = localUrl;
+                keyController.text = localKey;
+              });
             },
             child: const Text('Reset Locale'),
           ),
@@ -1207,6 +1303,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
             child: const Text('Salva'),
           ),
         ],
+      ),
       ),
     );
 
@@ -2119,8 +2216,15 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
 
           setState(() {});
 
+          // Get current mode to show appropriate message
+          final currentMode = await AppModeService.getCurrentMode();
+
           if (dbSaved) {
-            _showSnackBar('✅ File "$fileName" salvato e sincronizzato con database!', const Color(0xFF059669));
+            if (currentMode == AppMode.standalone) {
+              _showSnackBar('✅ File "$fileName" salvato in modalità locale!', const Color(0xFF059669));
+            } else {
+              _showSnackBar('✅ File "$fileName" salvato e sincronizzato con database!', const Color(0xFF059669));
+            }
           } else {
             _showSnackBar('✅ File "$fileName" salvato (database non disponibile)', const Color(0xFFEA580C));
           }

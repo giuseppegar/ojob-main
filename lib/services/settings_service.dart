@@ -83,4 +83,11 @@ class SettingsService {
     await prefs.remove(_keySupabaseUrl);
     await prefs.remove(_keySupabaseAnonKey);
   }
+
+  // Complete reset - clears ALL app data (including SharedPreferences)
+  // Use this when you want to start fresh as if the app was just installed
+  Future<void> resetAllData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+  }
 }

@@ -100,10 +100,15 @@ class SyncService {
   Future<void> _checkJobRequests() async {
     if (_appState == null) return;
 
-    // Skip polling in standalone mode - no server connection needed
-    if (_appState!.currentMode == AppMode.standalone) return;
+    // Skip polling in standalone mode - no database to poll
+    if (_appState!.currentMode == AppMode.standalone) {
+      if (kDebugMode) {
+        print('ℹ️ SyncService: Modalità standalone - polling database disabilitato');
+      }
+      return;
+    }
 
-    // Only poll in server mode
+    // Only poll in server mode (not in remote mode)
     if (_appState!.currentMode != AppMode.server) return;
 
     try {
@@ -390,6 +395,12 @@ class SyncService {
   Future<void> _monitorJobFiles() async {
     if (_appState == null) return;
 
+    // Job file monitoring works in both server AND standalone modes
+    // In standalone it just monitors files without syncing to database
+    if (kDebugMode && _appState!.currentMode == AppMode.standalone) {
+      print('ℹ️ SyncService: Modalità standalone - monitoraggio file locale attivo');
+    }
+
     // Placeholder for job file monitoring logic
     // This would contain the file system watching logic
   }
@@ -397,11 +408,12 @@ class SyncService {
   Future<void> _refreshQualityData() async {
     if (_appState == null) return;
 
-    // Skip refresh in standalone mode - no server connection needed
+    // In standalone mode, still monitor CSV but don't sync to database
     if (_appState!.currentMode == AppMode.standalone) {
       if (kDebugMode) {
-        print('ℹ️ SyncService: Modalità standalone - skip refresh quality data');
+        print('ℹ️ SyncService: Modalità standalone - monitoraggio CSV locale (senza sync database)');
       }
+      // TODO: Qui andrebbero letti i CSV e salvati con LocalDatabaseService invece di Supabase
       return;
     }
 
