@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 
 enum AppMode {
   server('Server', 'Macchina principale - Elabora file e richieste'),
-  remote('Remote', 'Controllo remoto - Visualizza dati e invia richieste');
+  remote('Remote', 'Controllo remoto - Visualizza dati e invia richieste'),
+  standalone('Standalone', 'Modalità locale - Senza connessione al database');
 
   const AppMode(this.label, this.description);
   final String label;

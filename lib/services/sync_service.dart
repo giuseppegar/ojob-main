@@ -98,7 +98,13 @@ class SyncService {
   }
 
   Future<void> _checkJobRequests() async {
-    if (_appState == null || _appState!.currentMode != AppMode.server) return;
+    if (_appState == null) return;
+
+    // Skip polling in standalone mode - no server connection needed
+    if (_appState!.currentMode == AppMode.standalone) return;
+
+    // Only poll in server mode
+    if (_appState!.currentMode != AppMode.server) return;
 
     try {
       if (kDebugMode) {
@@ -390,6 +396,14 @@ class SyncService {
 
   Future<void> _refreshQualityData() async {
     if (_appState == null) return;
+
+    // Skip refresh in standalone mode - no server connection needed
+    if (_appState!.currentMode == AppMode.standalone) {
+      if (kDebugMode) {
+        print('ℹ️ SyncService: Modalità standalone - skip refresh quality data');
+      }
+      return;
+    }
 
     // Placeholder for quality data refresh logic
     // This would contain CSV monitoring and database sync logic

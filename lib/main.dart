@@ -22,6 +22,7 @@ import 'services/keyboard_service.dart';
 import 'services/sync_service.dart';
 import 'services/settings_service.dart';
 import 'services/filter_service.dart';
+import 'services/local_database_service.dart';
 import 'widgets/filter_widget.dart';
 
 
@@ -239,9 +240,20 @@ class DatabaseService {
     required String filePath,
   }) async {
     try {
+      // Check app mode
+      final currentMode = await AppModeService.getCurrentMode();
+
+      // STANDALONE MODE: salva solo localmente
+      if (currentMode == AppMode.standalone) {
+        debugPrint('📱 DatabaseService: Modalità standalone - salvataggio locale');
+        return await LocalDatabaseService.instance.saveJobSchedule(articleCode, lot, pieces);
+      }
+
+      // ONLINE MODE: salva su Supabase
       final supabase = _supabase;
       if (supabase == null) {
         debugPrint('❌ DatabaseService: Supabase non inizializzato per saveJob');
+        debugPrint('💡 Suggerimento: passa a modalità Standalone per lavorare offline');
         return false;
       }
 
@@ -328,9 +340,20 @@ class DatabaseService {
   // Get job history
   static Future<List<Map<String, dynamic>>> getJobHistory() async {
     try {
+      // Check app mode
+      final currentMode = await AppModeService.getCurrentMode();
+
+      // STANDALONE MODE: usa solo dati locali
+      if (currentMode == AppMode.standalone) {
+        debugPrint('📱 AppModeService: Modalità standalone - recupero dati locali');
+        return await LocalDatabaseService.instance.getJobHistory();
+      }
+
+      // ONLINE MODE: usa Supabase
       final supabase = _supabase;
       if (supabase == null) {
         debugPrint('❌ AppModeService: Supabase non inizializzato per getJobHistory');
+        debugPrint('💡 Suggerimento: passa a modalità Standalone per lavorare offline');
         return [];
       }
 
@@ -350,15 +373,28 @@ class DatabaseService {
   // Get quality monitoring history with optional filtering
   static Future<List<Map<String, dynamic>>> getQualityHistory({FilterService? filterService}) async {
     try {
+      // Check app mode
+      final currentMode = await AppModeService.getCurrentMode();
+
+      // STANDALONE MODE: usa solo dati locali
+      if (currentMode == AppMode.standalone) {
+        debugPrint('📱 AppModeService: Modalità standalone - recupero quality history locale');
+        // TODO: Implementare filtri anche per modalità standalone se necessario
+        return await LocalDatabaseService.instance.getQualityHistory();
+      }
+
+      // ONLINE MODE: usa Supabase
       final supabase = _supabase;
       if (supabase == null) {
         debugPrint('❌ AppModeService: Supabase non inizializzato per getQualityHistory');
+        debugPrint('💡 Suggerimento: passa a modalità Standalone per lavorare offline');
         return [];
       }
 
+      // OTTIMIZZAZIONE 1: Recupera prima i quality_monitoring (senza JOIN costoso)
       var query = supabase
           .from('quality_monitoring')
-          .select('*, reject_details(*)');
+          .select('*'); // Rimuovo il join con reject_details
 
       // Applica filtri se forniti
       if (filterService != null) {
@@ -373,13 +409,67 @@ class DatabaseService {
         }
       }
 
+      // OTTIMIZZAZIONE 2: Aggiungi timeout di 10 secondi per evitare statement timeout
       final response = await query
           .order('timestamp', ascending: false)
-          .limit(50);
+          .limit(50)
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              debugPrint('⚠️ Query getQualityHistory timeout dopo 10s');
+              return [];
+            },
+          );
 
-      return List<Map<String, dynamic>>.from(response);
+      // OTTIMIZZAZIONE 3: Recupera reject_details in modo separato e più efficiente
+      // Solo se necessario e solo per i record recuperati
+      final qualityList = List<Map<String, dynamic>>.from(response);
+
+      if (qualityList.isNotEmpty) {
+        try {
+          // Estrai gli ID dei quality_monitoring recuperati
+          final qualityIds = qualityList
+              .map((q) => q['id'])
+              .where((id) => id != null)
+              .toList();
+
+          if (qualityIds.isNotEmpty) {
+            // Recupera tutti i reject_details in una singola query
+            final rejectDetails = await supabase
+                .from('reject_details')
+                .select('*')
+                .inFilter('quality_monitoring_id', qualityIds)
+                .timeout(
+                  const Duration(seconds: 5),
+                  onTimeout: () {
+                    debugPrint('⚠️ Query reject_details timeout dopo 5s');
+                    return [];
+                  },
+                );
+
+            // Aggiungi i reject_details ai rispettivi quality_monitoring
+            final rejectDetailsList = List<Map<String, dynamic>>.from(rejectDetails);
+            for (var quality in qualityList) {
+              quality['reject_details'] = rejectDetailsList
+                  .where((rd) => rd['quality_monitoring_id'] == quality['id'])
+                  .toList();
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Errore recupero reject_details (non critico): $e');
+          // Non bloccare l'operazione, semplicemente non aggiungiamo i reject_details
+        }
+      }
+
+      return qualityList;
     } catch (e) {
       debugPrint('Error getting quality history: $e');
+      // Gestione migliorata degli errori
+      if (e.toString().contains('timeout') || e.toString().contains('57014')) {
+        debugPrint('⚠️ Timeout query Supabase - considera di ottimizzare gli indici del database');
+      } else if (e.toString().contains('connection')) {
+        debugPrint('⚠️ Errore di connessione a Supabase - verifica la connessione internet');
+      }
       return [];
     }
   }
