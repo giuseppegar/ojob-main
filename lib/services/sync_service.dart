@@ -51,7 +51,7 @@ class SyncService {
         await _checkJobRequests();
       } catch (e) {
         if (kDebugMode) {
-          print('Error in job request polling: $e');
+          debugPrint('Error in job request polling: $e');
         }
       }
     });
@@ -65,7 +65,7 @@ class SyncService {
         await _monitorJobFiles();
       } catch (e) {
         if (kDebugMode) {
-          print('Error in job file monitoring: $e');
+          debugPrint('Error in job file monitoring: $e');
         }
       }
     });
@@ -79,7 +79,7 @@ class SyncService {
         await _refreshQualityData();
       } catch (e) {
         if (kDebugMode) {
-          print('Error in quality refresh: $e');
+          debugPrint('Error in quality refresh: $e');
         }
       }
     });
@@ -103,7 +103,7 @@ class SyncService {
     // Skip polling in standalone mode - no database to poll
     if (_appState!.currentMode == AppMode.standalone) {
       if (kDebugMode) {
-        print('ℹ️ SyncService: Modalità standalone - polling database disabilitato');
+        debugPrint('ℹ️ SyncService: Modalità standalone - polling database disabilitato');
       }
       return;
     }
@@ -113,7 +113,7 @@ class SyncService {
 
     try {
       if (kDebugMode) {
-        print('🔄 SyncService: Controllo job requests nel database...');
+        debugPrint('🔄 SyncService: Controllo job requests nel database...');
       }
 
       // Use AppModeService to get pending requests
@@ -121,26 +121,26 @@ class SyncService {
 
       if (requests.isNotEmpty) {
         if (kDebugMode) {
-          print('📨 SyncService: Trovate ${requests.length} richieste job pending');
+          debugPrint('📨 SyncService: Trovate ${requests.length} richieste job pending');
         }
 
         // Process each pending request
         for (final request in requests) {
           if (request['status'] == 'pending') {
             if (kDebugMode) {
-              print('🔄 SyncService: Elaborazione richiesta job: ${request['id']}');
+              debugPrint('🔄 SyncService: Elaborazione richiesta job: ${request['id']}');
             }
             await _processJobRequest(request);
           }
         }
       } else {
         if (kDebugMode) {
-          print('ℹ️ SyncService: Nessuna richiesta job pending trovata');
+          debugPrint('ℹ️ SyncService: Nessuna richiesta job pending trovata');
         }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore controllo job requests: $e');
+        debugPrint('❌ SyncService: Errore controllo job requests: $e');
       }
     }
   }
@@ -150,19 +150,19 @@ class SyncService {
       final supabase = Supabase.instance.client;
 
       if (kDebugMode) {
-        print('🔍 SyncService: Esecuzione query job_requests...');
-        print('🌐 SyncService: Connessione al database in corso...');
+        debugPrint('🔍 SyncService: Esecuzione query job_requests...');
+        debugPrint('🌐 SyncService: Connessione al database in corso...');
       }
 
       // Test di connettività di base
       try {
         await supabase.from('job_requests').select('count').limit(1).timeout(const Duration(seconds: 10));
         if (kDebugMode) {
-          print('✅ SyncService: Test di connettività riuscito');
+          debugPrint('✅ SyncService: Test di connettività riuscito');
         }
       } catch (testError) {
         if (kDebugMode) {
-          print('❌ SyncService: Test di connettività fallito: $testError');
+          debugPrint('❌ SyncService: Test di connettività fallito: $testError');
         }
         rethrow;
       }
@@ -175,21 +175,21 @@ class SyncService {
           .timeout(const Duration(seconds: 30));
 
       if (kDebugMode) {
-        print('✅ SyncService: Query completata, ${response.length} risultati');
+        debugPrint('✅ SyncService: Query completata, ${response.length} risultati');
       }
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore recupero richieste: $e');
+        debugPrint('❌ SyncService: Errore recupero richieste: $e');
         if (e.toString().contains('timeout') || e.toString().contains('TimeoutException')) {
-          print('⚠️ SyncService: Timeout connessione database (30s)');
-          print('🔧 SyncService: Controllare che il database sia raggiungibile all\'indirizzo configurato');
-          print('🌐 SyncService: Verificare configurazione URL in .env');
+          debugPrint('⚠️ SyncService: Timeout connessione database (30s)');
+          debugPrint('🔧 SyncService: Controllare che il database sia raggiungibile all\'indirizzo configurato');
+          debugPrint('🌐 SyncService: Verificare configurazione URL in .env');
         } else if (e.toString().contains('connection')) {
-          print('🔧 SyncService: Problema di connessione di rete - verificare connettività');
+          debugPrint('🔧 SyncService: Problema di connessione di rete - verificare connettività');
         } else {
-          print('🔧 SyncService: Errore generico - verificare configurazione database');
+          debugPrint('🔧 SyncService: Errore generico - verificare configurazione database');
         }
       }
       return [];
@@ -199,7 +199,7 @@ class SyncService {
   Future<void> _processJobRequest(Map<String, dynamic> request) async {
     try {
       if (kDebugMode) {
-        print('🔄 SyncService: Processando richiesta ${request['id']}');
+        debugPrint('🔄 SyncService: Processando richiesta ${request['id']}');
       }
 
       // Mark as processing
@@ -216,18 +216,18 @@ class SyncService {
         // Mark as completed
         await _markRequestCompleted(request['id']);
         if (kDebugMode) {
-          print('✅ SyncService: Job remoto completato: ${request['article_code']}');
+          debugPrint('✅ SyncService: Job remoto completato: ${request['article_code']}');
         }
       } else {
         // Mark as failed
         await _markRequestFailed(request['id'], 'Errore generazione file');
         if (kDebugMode) {
-          print('❌ SyncService: Job request fallito: ${request['id']}');
+          debugPrint('❌ SyncService: Job request fallito: ${request['id']}');
         }
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore processamento richiesta: $e');
+        debugPrint('❌ SyncService: Errore processamento richiesta: $e');
       }
       await _markRequestFailed(request['id'], e.toString());
     }
@@ -243,7 +243,7 @@ class SyncService {
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore marking processing: $e');
+        debugPrint('❌ SyncService: Errore marking processing: $e');
       }
       return false;
     }
@@ -259,7 +259,7 @@ class SyncService {
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore marking completed: $e');
+        debugPrint('❌ SyncService: Errore marking completed: $e');
       }
       return false;
     }
@@ -275,7 +275,7 @@ class SyncService {
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Errore marking failed: $e');
+        debugPrint('❌ SyncService: Errore marking failed: $e');
       }
       return false;
     }
@@ -292,7 +292,7 @@ class SyncService {
       final tabCount = '\t'.allMatches(content).length;
       if (tabCount != 2) {
         if (kDebugMode) {
-          print('❌ SyncService: Invalid format: TAB count ($tabCount/2)');
+          debugPrint('❌ SyncService: Invalid format: TAB count ($tabCount/2)');
         }
         return false;
       }
@@ -312,13 +312,13 @@ class SyncService {
             isAccessingSecureResource = await _startSecureBookmarkAccess();
             if (!isAccessingSecureResource) {
               if (kDebugMode) {
-                print('❌ SyncService: Failed to start accessing secure resource');
+                debugPrint('❌ SyncService: Failed to start accessing secure resource');
               }
               return false;
             }
           } catch (e) {
             if (kDebugMode) {
-              print('❌ SyncService: Error with secure bookmark: $e');
+              debugPrint('❌ SyncService: Error with secure bookmark: $e');
             }
             return false;
           }
@@ -330,7 +330,7 @@ class SyncService {
           finalPath = '${directory.path}/$fileName';
         } catch (e) {
           if (kDebugMode) {
-            print('❌ SyncService: Error getting documents directory: $e');
+            debugPrint('❌ SyncService: Error getting documents directory: $e');
           }
           return false;
         }
@@ -349,13 +349,13 @@ class SyncService {
       await _saveToDatabase(articleCode, lot, pieces);
 
       if (kDebugMode) {
-        print('✅ SyncService: Job file generated successfully: $finalPath');
+        debugPrint('✅ SyncService: Job file generated successfully: $finalPath');
       }
 
       return true;
     } catch (e) {
       if (kDebugMode) {
-        print('❌ SyncService: Error generating job file: $e');
+        debugPrint('❌ SyncService: Error generating job file: $e');
       }
       return false;
     } finally {
@@ -387,7 +387,7 @@ class SyncService {
     } catch (e) {
       // Non critical error, file is still generated
       if (kDebugMode) {
-        print('⚠️ SyncService: Errore salvataggio database: $e');
+        debugPrint('⚠️ SyncService: Errore salvataggio database: $e');
       }
     }
   }
@@ -398,7 +398,7 @@ class SyncService {
     // Job file monitoring works in both server AND standalone modes
     // In standalone it just monitors files without syncing to database
     if (kDebugMode && _appState!.currentMode == AppMode.standalone) {
-      print('ℹ️ SyncService: Modalità standalone - monitoraggio file locale attivo');
+      debugPrint('ℹ️ SyncService: Modalità standalone - monitoraggio file locale attivo');
     }
 
     // Placeholder for job file monitoring logic
@@ -411,7 +411,7 @@ class SyncService {
     // In standalone mode, still monitor CSV but don't sync to database
     if (_appState!.currentMode == AppMode.standalone) {
       if (kDebugMode) {
-        print('ℹ️ SyncService: Modalità standalone - monitoraggio CSV locale (senza sync database)');
+        debugPrint('ℹ️ SyncService: Modalità standalone - monitoraggio CSV locale (senza sync database)');
       }
       // TODO: Qui andrebbero letti i CSV e salvati con LocalDatabaseService invece di Supabase
       return;
@@ -438,7 +438,7 @@ class SyncService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error loading counter state: $e');
+        debugPrint('Error loading counter state: $e');
       }
     }
   }
@@ -464,7 +464,7 @@ class SyncService {
       }
     } catch (e) {
       if (kDebugMode) {
-        print('Error saving counter state: $e');
+        debugPrint('Error saving counter state: $e');
       }
     }
   }
@@ -525,7 +525,7 @@ class SyncService {
       return await secureBookmarks.startAccessingSecurityScopedResource(resolvedUrl);
     } catch (e) {
       if (kDebugMode) {
-        print('⚠️ SyncService: Error starting secure bookmark access: $e');
+        debugPrint('⚠️ SyncService: Error starting secure bookmark access: $e');
       }
       return false;
     }
@@ -542,7 +542,7 @@ class SyncService {
       await secureBookmarks.stopAccessingSecurityScopedResource(resolvedUrl);
     } catch (e) {
       if (kDebugMode) {
-        print('⚠️ SyncService: Error stopping secure bookmark access: $e');
+        debugPrint('⚠️ SyncService: Error stopping secure bookmark access: $e');
       }
     }
   }
@@ -559,7 +559,7 @@ class SyncService {
       await prefs.setStringList('job_history', history);
     } catch (e) {
       if (kDebugMode) {
-        print('⚠️ SyncService: Error saving to history: $e');
+        debugPrint('⚠️ SyncService: Error saving to history: $e');
       }
     }
   }
