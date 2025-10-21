@@ -1831,10 +1831,10 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
           controller: _tabController,
           tabs: [
             Tab(
-              icon: Icon(_currentMode == AppMode.server
+              icon: Icon((_currentMode == AppMode.server || _currentMode == AppMode.standalone)
                   ? PhosphorIcons.fileText()
                   : PhosphorIcons.paperPlaneRight()),
-              text: _currentMode == AppMode.server ? 'Genera File' : 'Richiedi Job',
+              text: (_currentMode == AppMode.server || _currentMode == AppMode.standalone) ? 'Genera File' : 'Richiedi Job',
             ),
             Tab(
               icon: Icon(PhosphorIcons.chartLine()),
@@ -1846,18 +1846,18 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
       body: TabBarView(
         controller: _tabController,
         children: [
-          _currentMode == AppMode.server
+          (_currentMode == AppMode.server || _currentMode == AppMode.standalone)
               ? ((){
-                  debugPrint('🏠 MainTabView - Creating JobScheduleHomePage for server mode');
+                  debugPrint('🏠 MainTabView - Creating JobScheduleHomePage for ${_currentMode.name} mode');
                   return const JobScheduleHomePage();
                 }())
               : ((){
                   debugPrint('📱 MainTabView - Creating RemoteJobRequestPage for remote mode');
                   return const RemoteJobRequestPage();
                 }()),
-          _currentMode == AppMode.server
+          (_currentMode == AppMode.server || _currentMode == AppMode.standalone)
               ? ((){
-                  debugPrint('📊 MainTabView - Creating QualityMonitoringPage for server mode');
+                  debugPrint('📊 MainTabView - Creating QualityMonitoringPage for ${_currentMode.name} mode');
                   return const QualityMonitoringPage();
                 }())
               : ((){
@@ -1986,7 +1986,8 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
 
       // Start/stop file monitoring based on mode
       // Job request polling is now handled globally by SyncService
-      if (_currentMode == AppMode.server) {
+      // Both server and standalone modes monitor files locally
+      if (_currentMode == AppMode.server || _currentMode == AppMode.standalone) {
         _startJobFileMonitoring();
       } else {
         _jobFileMonitorTimer?.cancel();
@@ -3671,7 +3672,8 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
     // Cancel existing timer first
     _jobFileMonitorTimer?.cancel();
 
-    if (_currentMode == AppMode.server && mounted) {
+    // Both server and standalone modes monitor files locally
+    if ((_currentMode == AppMode.server || _currentMode == AppMode.standalone) && mounted) {
       _jobFileMonitorTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
         if (mounted) {
           _checkForJobFiles();
@@ -3679,7 +3681,7 @@ class _JobScheduleHomePageState extends State<JobScheduleHomePage> {
           timer.cancel();
         }
       });
-      debugPrint('🔄 Started automatic job file monitoring (every 30 seconds)');
+      debugPrint('🔄 Started automatic job file monitoring in ${_currentMode.name} mode (every 30 seconds)');
     }
   }
 
@@ -3925,12 +3927,20 @@ class _QualityMonitoringPageState extends State<QualityMonitoringPage> {
       _isMonitoring = true;
     });
 
-    // Test database connection when starting monitoring
-    final dbConnected = await DatabaseService.testConnection();
-    if (dbConnected) {
-      _showSnackBar('🔄 Monitoraggio avviato - Database connesso', const Color(0xFF059669));
+    // Check current mode
+    final currentMode = await AppModeService.getCurrentMode();
+
+    if (currentMode == AppMode.standalone) {
+      // In standalone mode, data is saved locally
+      _showSnackBar('🔄 Monitoraggio avviato - Salvataggio locale', const Color(0xFF059669));
     } else {
-      _showSnackBar('🔄 Monitoraggio avviato - Database non disponibile', const Color(0xFFEA580C));
+      // Test database connection when starting monitoring in online modes
+      final dbConnected = await DatabaseService.testConnection();
+      if (dbConnected) {
+        _showSnackBar('🔄 Monitoraggio avviato - Database connesso', const Color(0xFF059669));
+      } else {
+        _showSnackBar('🔄 Monitoraggio avviato - Database non disponibile', const Color(0xFFEA580C));
+      }
     }
 
     _loadLatestCSVData();
