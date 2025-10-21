@@ -1215,7 +1215,15 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+        builder: (context, setDialogState) {
+          // Funzione helper per validare i campi
+          bool isFormValid() {
+            final url = urlController.text.trim();
+            final key = keyController.text.trim();
+            return url.isNotEmpty && key.isNotEmpty && _isValidUrl(url);
+          }
+
+          return AlertDialog(
         title: Row(
           children: [
             Icon(PhosphorIcons.wrench(), color: Theme.of(context).colorScheme.primary),
@@ -1242,6 +1250,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   border: OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.url,
+                onChanged: (_) => setDialogState(() {}),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -1253,6 +1262,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   border: OutlineInputBorder(),
                 ),
                 obscureText: true,
+                onChanged: (_) => setDialogState(() {}),
               ),
               const SizedBox(height: 16),
               Container(
@@ -1303,19 +1313,9 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
             child: const Text('Annulla'),
           ),
           TextButton(
-            onPressed: () async {
+            onPressed: isFormValid() ? () async {
               final url = urlController.text.trim();
               final key = keyController.text.trim();
-
-              if (url.isEmpty || key.isEmpty) {
-                // Notification disabled
-                return;
-              }
-
-              if (!_isValidUrl(url)) {
-                // Notification disabled
-                return;
-              }
 
               // Salva le configurazioni
               await SettingsService.instance.setSupabaseUrl(url);
@@ -1324,11 +1324,12 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
               if (!context.mounted) return;
 
               Navigator.of(context).pop(true);
-            },
+            } : null,
             child: const Text('Salva'),
           ),
         ],
-      ),
+      );
+        },
       ),
     );
 
