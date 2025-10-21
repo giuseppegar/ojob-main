@@ -1524,6 +1524,101 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                 const SizedBox(height: 16),
                 const Divider(),
                 const SizedBox(height: 8),
+                // Ripristina Database Section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(PhosphorIcons.database(), size: 16, color: Colors.orange.shade600),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Ripristina Database',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade600,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Ripristina la configurazione del database ai valori predefiniti locali. Utile se hai problemi di connessione.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: Row(
+                                  children: [
+                                    Icon(PhosphorIcons.database(), color: Colors.orange.shade600),
+                                    const SizedBox(width: 8),
+                                    const Text('Conferma Ripristino Database'),
+                                  ],
+                                ),
+                                content: const Text(
+                                  'Questa operazione ripristinerà la configurazione del database ai valori predefiniti locali.\n\n'
+                                  'La configurazione personalizzata del database verrà rimossa.\n\n'
+                                  'Vuoi continuare?'
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(context).pop(false),
+                                    child: const Text('Annulla'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () => Navigator.of(context).pop(true),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('Ripristina'),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirmed == true && context.mounted) {
+                              // Ripristina database
+                              await SettingsService.instance.resetToLocalDatabase();
+
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✅ Database ripristinato ai valori predefiniti'),
+                                    backgroundColor: Colors.green,
+                                    duration: Duration(seconds: 3),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: Icon(PhosphorIcons.arrowCounterClockwise(), size: 16),
+                          label: const Text('Ripristina Database Locale', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
                 // Reset Completo Section
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -1718,13 +1813,13 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
         actions: [
           // Combina i due badge in un popup menu per salvare spazio
           PopupMenuButton<String>(
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'settings') {
-                _showAppModeSettings();
+                await _showAppModeSettings();
               } else if (value == 'configure_db') {
-                _showDatabaseConfigDialog();
+                await _showDatabaseConfigDialog();
               } else if (value == 'test_db') {
-                _testDatabaseConnection();
+                await _testDatabaseConnection();
               }
             },
             icon: Row(
