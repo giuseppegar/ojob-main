@@ -114,8 +114,6 @@ class SettingsService {
     final prefs = await SharedPreferences.getInstance();
     // Salva il flag PRIMA di cancellare tutto
     await prefs.setBool(_keyNeedsConfigAfterReset, true);
-    // Ottieni il valore salvato per confermarlo
-    final needsConfig = prefs.getBool(_keyNeedsConfigAfterReset);
     // Ora cancella tutto TRANNE il flag
     final keys = prefs.getKeys().toList();
     for (final key in keys) {

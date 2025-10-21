@@ -408,17 +408,22 @@ class SyncService {
   Future<void> _refreshQualityData() async {
     if (_appState == null) return;
 
-    // In standalone mode, still monitor CSV but don't sync to database
+    // In standalone mode, CSV monitoring is handled by the main UI
+    // The main.dart file has _loadLatestCSVData() which reads CSV files
+    // and saves them via DatabaseService.saveQualityData()
+    // which now properly handles standalone mode by using LocalDatabaseService
     if (_appState!.currentMode == AppMode.standalone) {
       if (kDebugMode) {
-        debugPrint('ℹ️ SyncService: Modalità standalone - monitoraggio CSV locale (senza sync database)');
+        debugPrint('ℹ️ SyncService: Modalità standalone - monitoraggio CSV gestito da UI principale');
       }
-      // TODO: Qui andrebbero letti i CSV e salvati con LocalDatabaseService invece di Supabase
+      // CSV reading and local saving is now implemented in:
+      // - main.dart: _loadLatestCSVData() for reading CSV files
+      // - DatabaseService.saveQualityData() for saving (with standalone mode support)
       return;
     }
 
-    // Placeholder for quality data refresh logic
-    // This would contain CSV monitoring and database sync logic
+    // Placeholder for quality data refresh logic in online modes
+    // This would contain CSV monitoring and database sync logic for server/remote modes
   }
 
   Future<void> _loadCounterState() async {

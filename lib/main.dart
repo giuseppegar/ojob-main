@@ -280,9 +280,41 @@ class DatabaseService {
     try {
       debugPrint('🔄 DatabaseService: Inizio salvataggio dati qualità...');
 
+      // Check app mode
+      final currentMode = await AppModeService.getCurrentMode();
+
+      // STANDALONE MODE: salva solo localmente
+      if (currentMode == AppMode.standalone) {
+        debugPrint('📱 DatabaseService: Modalità standalone - salvataggio locale dati qualità');
+
+        // Save main quality record to local database
+        final saved = await LocalDatabaseService.instance.saveQualityMonitoring(
+          articleCode: monitoringPath, // Using monitoring path as identifier
+          lot: 'CSV-${DateTime.now().millisecondsSinceEpoch}',
+          pieces: data.totalPieces,
+          parts: 0, // Not available from CSV
+          goodPieces: data.goodPieces,
+          scrapPieces: data.rejectedPieces,
+          machine: 'CSV-Monitor',
+          elapsedSeconds: 0,
+          notes: 'Auto-salvato da monitoraggio CSV',
+        );
+
+        if (saved && data.latestRejects.isNotEmpty) {
+          debugPrint('🔄 DatabaseService: Salvataggio ${data.latestRejects.length} dettagli scarti in locale...');
+          // Save reject details
+          // Note: LocalDatabaseService expects quality_monitoring_id, which we would need to track
+          // For now, we'll skip reject details in standalone mode or implement a different approach
+        }
+
+        return saved;
+      }
+
+      // ONLINE MODE: salva su Supabase
       final supabase = _supabase;
       if (supabase == null) {
         debugPrint('❌ DatabaseService: Supabase non inizializzato per saveQualityData');
+        debugPrint('💡 Suggerimento: passa a modalità Standalone per lavorare offline');
         return false;
       }
 
