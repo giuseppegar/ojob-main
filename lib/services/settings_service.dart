@@ -16,6 +16,7 @@ class SettingsService {
   static const String _keySupabaseUrl = 'supabase_url';
   static const String _keySupabaseAnonKey = 'supabase_anon_key';
   static const String _keyAppMode = 'app_mode';
+  static const String _keyNeedsConfigAfterReset = 'needs_config_after_reset';
 
   Future<void> loadSettings(AppState appState) async {
     final prefs = await SharedPreferences.getInstance();
@@ -111,6 +112,28 @@ class SettingsService {
   // Use this when you want to start fresh as if the app was just installed
   Future<void> resetAllData() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    // Salva il flag PRIMA di cancellare tutto
+    await prefs.setBool(_keyNeedsConfigAfterReset, true);
+    // Ottieni il valore salvato per confermarlo
+    final needsConfig = prefs.getBool(_keyNeedsConfigAfterReset);
+    // Ora cancella tutto TRANNE il flag
+    final keys = prefs.getKeys().toList();
+    for (final key in keys) {
+      if (key != _keyNeedsConfigAfterReset) {
+        await prefs.remove(key);
+      }
+    }
+  }
+
+  // Controlla se è necessario mostrare la configurazione dopo un reset
+  Future<bool> needsConfigurationAfterReset() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyNeedsConfigAfterReset) ?? false;
+  }
+
+  // Cancella il flag dopo aver mostrato la configurazione
+  Future<void> clearConfigurationFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyNeedsConfigAfterReset);
   }
 }

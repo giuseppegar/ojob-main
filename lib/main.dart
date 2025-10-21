@@ -1032,7 +1032,21 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     // Initialize notification service with context
     WidgetsBinding.instance.addPostFrameCallback((_) {
       NotificationService.instance.setContext(context);
+      _checkConfigurationAfterReset();
     });
+  }
+
+  Future<void> _checkConfigurationAfterReset() async {
+    final needsConfig = await SettingsService.instance.needsConfigurationAfterReset();
+    if (needsConfig && mounted) {
+      // Cancella il flag
+      await SettingsService.instance.clearConfigurationFlag();
+      // Mostra automaticamente il dialog di configurazione
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        _showDatabaseConfigDialog();
+      }
+    }
   }
 
   Future<void> _loadCurrentMode() async {
@@ -1554,12 +1568,22 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                                 showDialog(
                                   context: context,
                                   barrierDismissible: false,
-                                  builder: (context) => const AlertDialog(
-                                    title: Text('Reset Completato'),
-                                    content: Text(
+                                  builder: (context) => AlertDialog(
+                                    title: const Text('Reset Completato'),
+                                    content: const Text(
                                       'Tutti i dati sono stati cancellati.\n\n'
-                                      'Riavvia manualmente l\'app per ricominciare.'
+                                      'Riavvia l\'app ora.\n\n'
+                                      'Al riavvio si aprirà automaticamente la configurazione del database.'
                                     ),
+                                    actions: [
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          // Chiudi l'app
+                                          exit(0);
+                                        },
+                                        child: const Text('Chiudi App'),
+                                      ),
+                                    ],
                                   ),
                                 );
                               }
