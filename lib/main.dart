@@ -1203,14 +1203,51 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
     final urlController = TextEditingController();
     final keyController = TextEditingController();
 
-    // Carica i valori attuali
-    final currentUrl = await SettingsService.instance.getSupabaseUrl();
-    final currentKey = await SettingsService.instance.getSupabaseAnonKey();
+    // Verifica che SharedPreferences sia accessibile
+    try {
+      await SharedPreferences.getInstance();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Errore critico: impossibile accedere alle impostazioni dell\'app. Prova a riavviare l\'applicazione.\n\nDettagli: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 8),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Carica i valori attuali
+      final currentUrl = await SettingsService.instance.getSupabaseUrl();
+      final currentKey = await SettingsService.instance.getSupabaseAnonKey();
+
+      if (!mounted) return;
+
+      urlController.text = currentUrl;
+      keyController.text = currentKey;
+    } catch (e) {
+      // Errore durante il caricamento delle impostazioni
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ Errore durante il caricamento delle impostazioni: ${e.toString()}\n\nVerranno usati i valori di default.'),
+          backgroundColor: Colors.orange,
+          duration: const Duration(seconds: 6),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      // Usa valori di default se il caricamento fallisce
+      urlController.text = 'https://garofalohouse.ddns.net:8443';
+      keyController.text = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MzIxMjQwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE';
+    }
 
     if (!mounted) return;
-
-    urlController.text = currentUrl;
-    keyController.text = currentKey;
 
     await showDialog<bool>(
       context: context,
@@ -1296,15 +1333,39 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
         actions: [
           TextButton(
             onPressed: () async {
-              // Reset to local database configuration
-              await SettingsService.instance.resetToLocalDatabase();
-              final localUrl = await SettingsService.instance.getSupabaseUrl();
-              final localKey = await SettingsService.instance.getSupabaseAnonKey();
+              try {
+                // Reset to local database configuration
+                await SettingsService.instance.resetToLocalDatabase();
+                final localUrl = await SettingsService.instance.getSupabaseUrl();
+                final localKey = await SettingsService.instance.getSupabaseAnonKey();
 
-              setDialogState(() {
-                urlController.text = localUrl;
-                keyController.text = localKey;
-              });
+                setDialogState(() {
+                  urlController.text = localUrl;
+                  keyController.text = localKey;
+                });
+
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('✅ Reset alle impostazioni locali completato'),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 2),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              } catch (e) {
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Errore durante il reset: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
             },
             child: const Text('Reset Locale'),
           ),
@@ -1314,16 +1375,38 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
           ),
           TextButton(
             onPressed: isFormValid() ? () async {
-              final url = urlController.text.trim();
-              final key = keyController.text.trim();
+              try {
+                final url = urlController.text.trim();
+                final key = keyController.text.trim();
 
-              // Salva le configurazioni
-              await SettingsService.instance.setSupabaseUrl(url);
-              await SettingsService.instance.setSupabaseAnonKey(key);
+                // Salva le configurazioni
+                await SettingsService.instance.setSupabaseUrl(url);
+                await SettingsService.instance.setSupabaseAnonKey(key);
 
-              if (!context.mounted) return;
+                if (!context.mounted) return;
 
-              Navigator.of(context).pop(true);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('✅ Configurazione salvata con successo! Riavvia l\'app per applicare le modifiche.'),
+                    backgroundColor: Colors.green,
+                    duration: const Duration(seconds: 4),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+
+                Navigator.of(context).pop(true);
+              } catch (e) {
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Errore durante il salvataggio: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
             } : null,
             child: const Text('Salva'),
           ),
@@ -1814,12 +1897,25 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
           // Combina i due badge in un popup menu per salvare spazio
           PopupMenuButton<String>(
             onSelected: (value) async {
-              if (value == 'settings') {
-                await _showAppModeSettings();
-              } else if (value == 'configure_db') {
-                await _showDatabaseConfigDialog();
-              } else if (value == 'test_db') {
-                await _testDatabaseConnection();
+              try {
+                if (value == 'settings') {
+                  await _showAppModeSettings();
+                } else if (value == 'configure_db') {
+                  await _showDatabaseConfigDialog();
+                } else if (value == 'test_db') {
+                  await _testDatabaseConnection();
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('❌ Errore: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 5),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
               }
             },
             icon: Row(
