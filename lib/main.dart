@@ -1205,10 +1205,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
 
     // Verifica che SharedPreferences sia accessibile
     try {
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs == null) {
-        throw Exception('SharedPreferences non inizializzato');
-      }
+      await SharedPreferences.getInstance();
     } catch (e) {
       if (!mounted) return;
 
@@ -1909,7 +1906,7 @@ class _MainTabViewState extends State<MainTabView> with TickerProviderStateMixin
                   await _testDatabaseConnection();
                 }
               } catch (e) {
-                if (!mounted) return;
+                if (!context.mounted) return;
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
